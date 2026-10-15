@@ -21,6 +21,11 @@
 #include "Gpu.h"
 #include "Internal.h"
 
+#ifdef Q_OS_DARWIN
+extern "C" void* objc_autoreleasePoolPush();
+extern "C" void objc_autoreleasePoolPop(void* pool);
+#endif
+
 namespace gpu {
 class Device::Thread : public QThread {
  public:
@@ -135,7 +140,13 @@ void Device::threadLoop() {
     Task* task = m_tasks.front();
     m_tasks.pop_front();
     lock.unlock();
+#ifdef Q_OS_DARWIN
+    void* const pool = objc_autoreleasePoolPush();
     task->fn();
+    objc_autoreleasePoolPop(pool);
+#else
+    task->fn();
+#endif
     lock.lock();
     task->done = true;
     m_cond.notify_all();
@@ -187,7 +198,7 @@ bool Device::initialize() {
   if (!m_rhi && wanted("d3d11")) {
     tryCreate(QRhi::D3D11, &d3d11Params, "Direct3D 11");
   }
-#elif QT_CONFIG(vulkan)
+#elif QT_CONFIG(vulkan) && __has_include(<vulkan/vulkan.h>)
   if (wanted("vulkan")) {
     m_vulkanInstance = std::make_unique<QVulkanInstance>();
     m_vulkanInstance->setExtensions(QRhiVulkanInitParams::preferredInstanceExtensions());
@@ -234,7 +245,9 @@ void Device::release() {
   m_dummyStorage.reset();
   m_dummyUniform.reset();
   m_rhi.reset();
+#if QT_CONFIG(vulkan)
   m_vulkanInstance.reset();
+#endif
 }
 
 void Device::markUnavailable(const QString& reason) {
