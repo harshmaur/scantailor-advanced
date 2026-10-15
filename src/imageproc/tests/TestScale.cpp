@@ -7,6 +7,7 @@
 #include <QImage>
 #include <QSize>
 #include <boost/test/unit_test.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -24,15 +25,47 @@ BOOST_AUTO_TEST_CASE(test_null_image) {
   BOOST_CHECK(scaleToGray(nullImg, QSize(1, 1)).isNull());
 }
 
-static bool fuzzyCompare(const QImage& img1, const QImage& img2) {
+// Exact area-averaging (box filter) downscale in floating point.
+// Deliberately independent of QImage::scaled(), whose smooth scaling path
+// depends on the Qt version and the image format.
+static GrayImage boxScaleDown(const GrayImage& src, const QSize& dstSize) {
+  const int sw = src.width();
+  const int sh = src.height();
+  const int dw = dstSize.width();
+  const int dh = dstSize.height();
+  const double xRatio = static_cast<double>(sw) / dw;
+  const double yRatio = static_cast<double>(sh) / dh;
+
+  GrayImage dst(dstSize);
+  for (int dy = 0; dy < dh; ++dy) {
+    const double top = dy * yRatio;
+    const double bottom = (dy + 1) * yRatio;
+    for (int dx = 0; dx < dw; ++dx) {
+      const double left = dx * xRatio;
+      const double right = (dx + 1) * xRatio;
+      double sum = 0.0;
+      for (int sy = static_cast<int>(top); sy < sh && sy < bottom; ++sy) {
+        const double wy = std::min<double>(sy + 1, bottom) - std::max<double>(sy, top);
+        for (int sx = static_cast<int>(left); sx < sw && sx < right; ++sx) {
+          const double wx = std::min<double>(sx + 1, right) - std::max<double>(sx, left);
+          sum += wx * wy * src.data()[sy * src.stride() + sx];
+        }
+      }
+      dst.data()[dy * dst.stride() + dx] = static_cast<uint8_t>(std::lround(sum / (xRatio * yRatio)));
+    }
+  }
+  return dst;
+}
+
+static bool fuzzyCompare(const GrayImage& img1, const GrayImage& img2) {
   BOOST_REQUIRE(img1.size() == img2.size());
 
   const int width = img1.width();
   const int height = img1.height();
-  const uint8_t* line1 = img1.bits();
-  const uint8_t* line2 = img2.bits();
-  const int line1Bpl = img1.bytesPerLine();
-  const int line2Bpl = img2.bytesPerLine();
+  const uint8_t* line1 = img1.data();
+  const uint8_t* line2 = img2.data();
+  const int line1Stride = img1.stride();
+  const int line2Stride = img2.stride();
 
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
@@ -40,16 +73,14 @@ static bool fuzzyCompare(const QImage& img1, const QImage& img2) {
         return false;
       }
     }
-    line1 += line1Bpl;
-    line2 += line2Bpl;
+    line1 += line1Stride;
+    line2 += line2Stride;
   }
   return true;
 }
 
 static bool checkScale(const GrayImage& img, const QSize& newSize) {
-  const GrayImage scaled1(scaleToGray(img, newSize));
-  const GrayImage scaled2(img.toQImage().scaled(newSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
-  return fuzzyCompare(scaled1, scaled2);
+  return fuzzyCompare(scaleToGray(img, newSize), boxScaleDown(img, newSize));
 }
 
 BOOST_AUTO_TEST_CASE(test_random_image) {
@@ -62,15 +93,17 @@ BOOST_AUTO_TEST_CASE(test_random_image) {
     line += img.stride();
   }
 
-  // Unfortunately scaleToGray() and QImage::scaled()
-  // produce too different results when upscaling.
+  // Only downscaling is checked: it is plain area averaging.
+  // QImage::scaled() is not used as the reference because Qt 6 applies area
+  // averaging to Indexed8 images only for downscaling by more than 2x (or for
+  // very large images) and uses bilinear sampling otherwise.
+  // scaleToGray() snaps source coordinates to 1/32 pixel, so the sizes are
+  // chosen to give source/destination ratios that are multiples of 1/32.
 
   BOOST_CHECK(checkScale(img, QSize(50, 50)));
-  // BOOST_CHECK(checkScale(img, QSize(200, 200)));
   BOOST_CHECK(checkScale(img, QSize(80, 80)));
-  // BOOST_CHECK(checkScale(img, QSize(140, 140)));
-  // BOOST_CHECK(checkScale(img, QSize(55, 145)));
-  // BOOST_CHECK(checkScale(img, QSize(145, 55)));
+  BOOST_CHECK(checkScale(img, QSize(25, 25)));
+  BOOST_CHECK(checkScale(img, QSize(80, 50)));
 }
 
 BOOST_AUTO_TEST_SUITE_END()
