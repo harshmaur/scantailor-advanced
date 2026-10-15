@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
+#include <algorithm>
 
 #include "Utils.h"
 
@@ -34,16 +36,16 @@ static bool fuzzyCompare(const QImage& img1, const QImage& img2) {
   const int line1Bpl = img1.bytesPerLine();
   const int line2Bpl = img2.bytesPerLine();
 
+  int maxDiff = 0;
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
-      if (std::abs(int(line1[x]) - int(line2[x])) > 1) {
-        return false;
-      }
+      maxDiff = std::max(maxDiff, std::abs(int(line1[x]) - int(line2[x])));
     }
     line1 += line1Bpl;
     line2 += line2Bpl;
   }
-  return true;
+  std::fprintf(stderr, "DIAG size %dx%d maxDiff %d\n", width, height, maxDiff);
+  return maxDiff <= 1;
 }
 
 static bool checkScale(const GrayImage& img, const QSize& newSize) {
