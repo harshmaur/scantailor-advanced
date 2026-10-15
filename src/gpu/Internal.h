@@ -13,8 +13,12 @@ qint64 maxBufferBytes();
 
 qint64 minTransformPixels();
 
+qint64 minDewarpPixels();
+
 void countDispatch();
 
 void countRecomputedRows(qint64 rows);
+
+void countRecomputedColumns(qint64 columns);
 }  // namespace gpu
 #endif  // SCANTAILOR_GPU_INTERNAL_H_

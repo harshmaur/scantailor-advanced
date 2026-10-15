@@ -1,13 +1,15 @@
 set(sources
     Gpu.cpp Gpu.h
     Internal.h
-    TransformKernel.h)
+    TransformKernel.h
+    DewarpKernel.h)
 
 if (GPU_SUPPORT)
   list(APPEND sources
       Device.cpp Device.h
       Banding.cpp Banding.h
-      TransformKernel.cpp)
+      TransformKernel.cpp
+      DewarpKernel.cpp)
 else()
   list(APPEND sources Stub.cpp)
 endif()
@@ -30,6 +32,16 @@ if (GPU_SUPPORT)
         DEFINES "FORMAT_${format_define}=1"
         FILES shaders/transform.comp
         OUTPUTS "transform_${format}.comp.qsb")
+    qt_add_shaders(
+        gpu "gpu_dewarp_${format}"
+        PREFIX "/gpu"
+        GLSL "430"
+        HLSL 50
+        MSL 12
+        QUIET
+        DEFINES "FORMAT_${format_define}=1"
+        FILES shaders/dewarp.comp
+        OUTPUTS "dewarp_${format}.comp.qsb")
   endforeach()
 endif()
 

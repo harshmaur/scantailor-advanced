@@ -45,6 +45,12 @@ void setMaxBufferBytes(qint64 bytes);
 void setMinTransformPixels(qint64 pixels);
 
 /**
+ * \brief Overrides the minimum number of output pixels for which RasterDewarper uses the GPU.
+ *        A negative value restores the default.
+ */
+void setMinDewarpPixels(qint64 pixels);
+
+/**
  * \brief The number of compute dispatches that completed successfully.
  */
 qint64 dispatchCount();
@@ -53,6 +59,11 @@ qint64 dispatchCount();
  * \brief The number of output rows that GPU kernels left to the CPU.
  */
 qint64 recomputedRows();
+
+/**
+ * \brief The number of output columns that the dewarp kernel left to the CPU.
+ */
+qint64 recomputedColumns();
 }  // namespace testing
 }  // namespace gpu
 #endif  // SCANTAILOR_GPU_GPU_H_

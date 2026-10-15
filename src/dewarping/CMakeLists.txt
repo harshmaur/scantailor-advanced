@@ -12,5 +12,5 @@ set(sources
     RasterDewarper.cpp RasterDewarper.h)
 
 add_library(dewarping STATIC ${sources})
-target_link_libraries(dewarping PUBLIC imageproc)
+target_link_libraries(dewarping PUBLIC imageproc gpu)
 target_include_directories(dewarping PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
