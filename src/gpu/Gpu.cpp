@@ -11,12 +11,15 @@ namespace gpu {
 namespace {
 constexpr qint64 DEFAULT_MAX_BUFFER_BYTES = qint64(64) << 20;
 constexpr qint64 DEFAULT_MIN_TRANSFORM_PIXELS = 1 << 20;
+constexpr qint64 DEFAULT_MIN_DEWARP_PIXELS = 1 << 20;
 
 std::atomic<bool> enabledSetting(true);
 std::atomic<qint64> maxBufferBytesOverride(0);
 std::atomic<qint64> minTransformPixelsOverride(-1);
+std::atomic<qint64> minDewarpPixelsOverride(-1);
 std::atomic<qint64> dispatches(0);
 std::atomic<qint64> recomputed(0);
+std::atomic<qint64> recomputedCols(0);
 }  // namespace
 
 void setEnabled(const bool enabled) {
@@ -48,12 +51,21 @@ qint64 minTransformPixels() {
   return pixels >= 0 ? pixels : DEFAULT_MIN_TRANSFORM_PIXELS;
 }
 
+qint64 minDewarpPixels() {
+  const qint64 pixels = minDewarpPixelsOverride;
+  return pixels >= 0 ? pixels : DEFAULT_MIN_DEWARP_PIXELS;
+}
+
 void countDispatch() {
   ++dispatches;
 }
 
 void countRecomputedRows(const qint64 rows) {
   recomputed += rows;
+}
+
+void countRecomputedColumns(const qint64 columns) {
+  recomputedCols += columns;
 }
 
 namespace testing {
@@ -65,12 +77,20 @@ void setMinTransformPixels(const qint64 pixels) {
   minTransformPixelsOverride = pixels;
 }
 
+void setMinDewarpPixels(const qint64 pixels) {
+  minDewarpPixelsOverride = pixels;
+}
+
 qint64 dispatchCount() {
   return dispatches;
 }
 
 qint64 recomputedRows() {
   return recomputed;
+}
+
+qint64 recomputedColumns() {
+  return recomputedCols;
 }
 }  // namespace testing
 }  // namespace gpu
