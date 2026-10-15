@@ -12,7 +12,7 @@
 #include <random>
 #include <vector>
 
-#include "Gpu.h"
+#include "Internal.h"
 #include "TestImages.h"
 
 namespace gpu {
@@ -21,25 +21,15 @@ using dewarping::CylindricalSurfaceDewarper;
 using dewarping::RasterDewarper;
 
 namespace {
-struct GpuAvailable {
-  boost::test_tools::assertion_result operator()(boost::unit_test::test_unit_id) const {
-    boost::test_tools::assertion_result result(isAvailable());
-    if (!result) {
-      result.message() << "no GPU device with compute support, skipping the GPU tests";
-    }
-    return result;
-  }
-};
-
 struct DewarpSettingsFixture {
   DewarpSettingsFixture() {
     setEnabled(true);
-    testing::setMinDewarpPixels(0);
+    testing::setMinPixels(0);
   }
 
   ~DewarpSettingsFixture() {
     setEnabled(true);
-    testing::setMinDewarpPixels(-1);
+    testing::setMinPixels(-1);
     testing::setMaxBufferBytes(0);
   }
 };
@@ -111,8 +101,7 @@ const std::vector<QColor> backgrounds = {Qt::white, QColor(10, 200, 30), QColor(
 BOOST_AUTO_TEST_SUITE(GpuDewarpEnvironmentTestSuite)
 
 BOOST_FIXTURE_TEST_CASE(test_dewarp_env_off_uses_cpu, DewarpSettingsFixture) {
-  const QByteArray old = qgetenv("SCANTAILOR_GPU");
-  qputenv("SCANTAILOR_GPU", "0");
+  const EnvVar env("SCANTAILOR_GPU", "0");
   const QImage src = textLikeImage(QImage::Format_RGB32, 120, 90, 1);
   const Model model = pageModel(src.size());
   const qint64 dispatches = testing::dispatchCount();
@@ -121,11 +110,6 @@ BOOST_FIXTURE_TEST_CASE(test_dewarp_env_off_uses_cpu, DewarpSettingsFixture) {
   setEnabled(false);
   const QImage cpu = dewarp(src, src.size(), model, QRectF(5, 5, 110, 80), Qt::white);
   BOOST_CHECK_EQUAL(compareImages(cpu, result).mismatches, 0);
-  if (old.isNull()) {
-    qunsetenv("SCANTAILOR_GPU");
-  } else {
-    qputenv("SCANTAILOR_GPU", old);
-  }
 }
 
 BOOST_AUTO_TEST_SUITE_END()
@@ -133,7 +117,7 @@ BOOST_AUTO_TEST_SUITE_END()
 BOOST_AUTO_TEST_SUITE(GpuDewarpTestSuite, *boost::unit_test::precondition(GpuAvailable()))
 
 BOOST_FIXTURE_TEST_CASE(test_dewarp_min_size_uses_cpu, DewarpSettingsFixture) {
-  testing::setMinDewarpPixels(10000);
+  testing::setMinPixels(10000);
   const QImage src = randomImage(QImage::Format_RGB32, 60, 60, 3);
   const qint64 dispatches = testing::dispatchCount();
   dewarp(src, src.size(), pageModel(src.size()), QRectF(0, 0, 60, 60), Qt::white);
@@ -203,9 +187,9 @@ BOOST_FIXTURE_TEST_CASE(test_dewarp_extreme_models, DewarpSettingsFixture) {
   checkGpuMatchesCpu(src, QSize(180, 150), model, QRectF(85, 70, 2, 2), Qt::white);
   checkGpuMatchesCpu(src, QSize(180, 150), model, QRectF(-5000, -4000, 10000, 9000), Qt::white);
 
-  const qint64 recomputed = testing::recomputedColumns();
+  const qint64 recomputed = testing::recomputedCount();
   checkGpuMatchesCpu(src, QSize(3, 2), model, QRectF(0, 0, 3, 2), QColor(10, 200, 30));
-  BOOST_CHECK_GT(testing::recomputedColumns(), recomputed);
+  BOOST_CHECK_GT(testing::recomputedCount(), recomputed);
 }
 
 BOOST_FIXTURE_TEST_CASE(test_dewarp_banding, DewarpSettingsFixture) {
@@ -232,9 +216,9 @@ BOOST_FIXTURE_TEST_CASE(test_dewarp_band_too_small_falls_back, DewarpSettingsFix
 BOOST_FIXTURE_TEST_CASE(test_dewarp_realistic_models_need_no_cpu_columns, DewarpSettingsFixture) {
   const QImage src = textLikeImage(QImage::Format_RGB32, 411, 533, 800);
   for (const Model& model : sampleModels(src.size())) {
-    const qint64 recomputed = testing::recomputedColumns();
+    const qint64 recomputed = testing::recomputedCount();
     checkGpuMatchesCpu(src, src.size(), model, QRectF(QPointF(0, 0), QSizeF(src.size())), Qt::white);
-    BOOST_CHECK_EQUAL(testing::recomputedColumns(), recomputed);
+    BOOST_CHECK_EQUAL(testing::recomputedCount(), recomputed);
   }
 }
 

@@ -10,7 +10,7 @@
 #include <random>
 #include <vector>
 
-#include "Gpu.h"
+#include "Internal.h"
 #include "TestImages.h"
 
 namespace gpu {
@@ -18,46 +18,17 @@ namespace tests {
 using imageproc::OutsidePixels;
 
 namespace {
-struct GpuAvailable {
-  boost::test_tools::assertion_result operator()(boost::unit_test::test_unit_id) const {
-    boost::test_tools::assertion_result result(isAvailable());
-    if (!result) {
-      result.message() << "no GPU device with compute support, skipping the GPU tests";
-    } else {
-      BOOST_TEST_MESSAGE("GPU device: " << deviceName().toStdString());
-    }
-    return result;
-  }
-};
-
 struct GpuSettingsFixture {
   GpuSettingsFixture() {
     setEnabled(true);
-    testing::setMinTransformPixels(0);
+    testing::setMinPixels(0);
   }
 
   ~GpuSettingsFixture() {
     setEnabled(true);
-    testing::setMinTransformPixels(-1);
+    testing::setMinPixels(-1);
     testing::setMaxBufferBytes(0);
   }
-};
-
-class EnvVar {
- public:
-  EnvVar(const char* name, const QByteArray& value) : m_name(name), m_old(qgetenv(name)) { qputenv(name, value); }
-
-  ~EnvVar() {
-    if (m_old.isNull()) {
-      qunsetenv(m_name);
-    } else {
-      qputenv(m_name, m_old);
-    }
-  }
-
- private:
-  const char* m_name;
-  QByteArray m_old;
 };
 
 enum class Mode { Transform, TransformToGray };
@@ -91,15 +62,14 @@ void checkGpuMatchesCpu(const Mode mode,
                             << dstRect.width() << "x" << dstRect.height() << " flags " << outside.flags())
   BOOST_TEST_CONTEXT("xform " << xform.m11() << " " << xform.m12() << " " << xform.m21() << " " << xform.m22() << " "
                               << xform.dx() << " " << xform.dy()) {
-    BOOST_CHECK_GE(testing::dispatchCount() - dispatches, minDispatches);
+    if (gpu.format() == QImage::Format_ARGB32) {
+      BOOST_CHECK_EQUAL(testing::dispatchCount(), dispatches);
+    } else {
+      BOOST_CHECK_GE(testing::dispatchCount() - dispatches, minDispatches);
+    }
     BOOST_REQUIRE_EQUAL(cpu.format(), gpu.format());
     BOOST_REQUIRE(cpu.size() == gpu.size());
-    const ImageDiff diff = compareImages(cpu, gpu);
-    if (cpu.format() == QImage::Format_ARGB32) {
-      BOOST_CHECK_LE(diff.maxChannelDiff, 1);
-    } else {
-      BOOST_CHECK_EQUAL(diff.mismatches, 0);
-    }
+    BOOST_CHECK_EQUAL(compareImages(cpu, gpu).mismatches, 0);
   }
 }
 
@@ -136,16 +106,10 @@ const std::vector<QImage::Format> allFormats = {QImage::Format_Indexed8, QImage:
 
 BOOST_AUTO_TEST_SUITE(GpuEnvironmentTestSuite)
 
-BOOST_AUTO_TEST_CASE(test_required_device_is_available) {
-  if (qgetenv("SCANTAILOR_GPU_REQUIRED") == "1") {
-    BOOST_REQUIRE_MESSAGE(isAvailable(), "SCANTAILOR_GPU_REQUIRED=1 but no GPU device with compute support");
-  }
-}
-
 BOOST_FIXTURE_TEST_CASE(test_env_off_uses_cpu, GpuSettingsFixture) {
   const EnvVar env("SCANTAILOR_GPU", "0");
   BOOST_CHECK(!isEnabled());
-  BOOST_CHECK(!isAvailable());
+  BOOST_CHECK(state() == State::Unavailable);
 
   const QImage src = textLikeImage(QImage::Format_RGB32, 101, 67, 1);
   const QTransform xform = QTransform().rotate(1.7);
@@ -164,18 +128,8 @@ BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE(GpuTransformTestSuite, *boost::unit_test::precondition(GpuAvailable()))
 
-BOOST_FIXTURE_TEST_CASE(test_env_on_overrides_setting, GpuSettingsFixture) {
-  const EnvVar env("SCANTAILOR_GPU", "1");
-  setEnabled(false);
-  BOOST_CHECK(isEnabled());
-  const QImage src = randomImage(QImage::Format_RGB32, 33, 17, 2);
-  const qint64 dispatches = testing::dispatchCount();
-  imageproc::transform(src, QTransform().rotate(5), src.rect(), OutsidePixels::assumeColor(Qt::white));
-  BOOST_CHECK_GT(testing::dispatchCount(), dispatches);
-}
-
 BOOST_FIXTURE_TEST_CASE(test_min_size_uses_cpu, GpuSettingsFixture) {
-  testing::setMinTransformPixels(1000);
+  testing::setMinPixels(1000);
   const QImage src = randomImage(QImage::Format_RGB32, 20, 20, 3);
   const qint64 dispatches = testing::dispatchCount();
   imageproc::transform(src, QTransform().rotate(5), src.rect(), OutsidePixels::assumeColor(Qt::white));
@@ -295,9 +249,9 @@ BOOST_FIXTURE_TEST_CASE(test_exact_transforms_need_no_cpu_rows, GpuSettingsFixtu
   const QImage src = textLikeImage(QImage::Format_RGB32, 211, 157, 800);
   for (const QTransform& xform : {QTransform(), QTransform().rotate(90), QTransform().rotate(180),
                                   QTransform().scale(2, 2), QTransform().scale(0.5, 0.5).translate(3, 7)}) {
-    const qint64 recomputed = testing::recomputedRows();
+    const qint64 recomputed = testing::recomputedCount();
     checkGpuMatchesCpu(Mode::Transform, src, xform, mappedRect(src, xform, 2), OutsidePixels::assumeColor(Qt::white));
-    BOOST_CHECK_EQUAL(testing::recomputedRows(), recomputed);
+    BOOST_CHECK_EQUAL(testing::recomputedCount(), recomputed);
   }
 }
 

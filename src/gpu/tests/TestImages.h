@@ -4,8 +4,13 @@
 #ifndef SCANTAILOR_GPU_TESTS_TESTIMAGES_H_
 #define SCANTAILOR_GPU_TESTS_TESTIMAGES_H_
 
+#include <QByteArray>
 #include <QImage>
+#include <boost/test/detail/global_typedef.hpp>
+#include <boost/test/tools/assertion_result.hpp>
 #include <cstdint>
+
+#include "Gpu.h"
 
 namespace gpu {
 namespace tests {
@@ -29,6 +34,33 @@ struct ImageDiff {
  * Compares the visible pixels of two images of the same size and format.
  */
 ImageDiff compareImages(const QImage& lhs, const QImage& rhs);
+
+struct GpuAvailable {
+  boost::test_tools::assertion_result operator()(boost::unit_test::test_unit_id) const {
+    boost::test_tools::assertion_result result(isAvailable());
+    if (!result) {
+      result.message() << "no GPU device with compute support, skipping the GPU tests";
+    }
+    return result;
+  }
+};
+
+class EnvVar {
+ public:
+  EnvVar(const char* name, const QByteArray& value) : m_name(name), m_old(qgetenv(name)) { qputenv(name, value); }
+
+  ~EnvVar() {
+    if (m_old.isNull()) {
+      qunsetenv(m_name);
+    } else {
+      qputenv(m_name, m_old);
+    }
+  }
+
+ private:
+  const char* m_name;
+  QByteArray m_old;
+};
 }  // namespace tests
 }  // namespace gpu
 #endif  // SCANTAILOR_GPU_TESTS_TESTIMAGES_H_

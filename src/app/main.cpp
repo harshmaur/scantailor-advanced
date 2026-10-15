@@ -53,6 +53,7 @@ int main(int argc, char* argv[]) {
 
   app.installLanguage(ApplicationSettings::getInstance().getLanguage());
   gpu::setEnabled(ApplicationSettings::getInstance().isGpuProcessingEnabled());
+  gpu::start();
 
   {
     std::unique_ptr<ColorScheme> scheme

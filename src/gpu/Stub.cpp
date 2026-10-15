@@ -7,6 +7,12 @@
 #include "TransformKernel.h"
 
 namespace gpu {
+void start() {}
+
+State state() {
+  return State::Unavailable;
+}
+
 bool isAvailable() {
   return false;
 }

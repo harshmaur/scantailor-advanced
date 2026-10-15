@@ -7,6 +7,7 @@
 
 #include <QDebug>
 #include <cassert>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -281,7 +282,7 @@ static void transformGenericLines(const StorageUnit* const srcData,
 }  // transformGenericLines
 
 template <typename StorageUnit, typename Mixer>
-static void transformGeneric(const gpu::TransformFormat gpuFormat,
+static void transformGeneric(const std::optional<gpu::TransformFormat> gpuFormat,
                              const StorageUnit* const srcData,
                              const int srcStride,
                              const QSize srcSize,
@@ -304,36 +305,38 @@ static void transformGeneric(const gpu::TransformFormat gpuFormat,
   const int src32UnitW = std::max<int>(1, qRound(src32UnitSize.width()));
   const int src32UnitH = std::max<int>(1, qRound(src32UnitSize.height()));
 
-  const auto bytesPerUnit = static_cast<int>(sizeof(StorageUnit));
-  const gpu::TransformParams gpuParams{gpuFormat,
-                                       reinterpret_cast<const uint8_t*>(srcData),
-                                       srcSize.width(),
-                                       srcSize.height(),
-                                       srcStride * bytesPerUnit,
-                                       reinterpret_cast<uint8_t*>(dstData),
-                                       dw,
-                                       dh,
-                                       dstStride * bytesPerUnit,
-                                       invXform.m11(),
-                                       invXform.m12(),
-                                       invXform.m21(),
-                                       invXform.m22(),
-                                       invXform.dx(),
-                                       invXform.dy(),
-                                       src32UnitW,
-                                       src32UnitH,
-                                       outsideColor,
-                                       outsideFlags};
-  std::vector<int> rowsToRecompute;
-  if (!gpu::transform(gpuParams, rowsToRecompute)) {
-    transformGenericLines<StorageUnit, Mixer>(srcData, srcStride, srcSize, dstData, dstStride, invXform, dw, src32UnitW,
-                                              src32UnitH, outsideColor, outsideFlags, 0, dh);
-    return;
+  if (gpuFormat) {
+    const auto bytesPerUnit = static_cast<int>(sizeof(StorageUnit));
+    const gpu::TransformParams gpuParams{*gpuFormat,
+                                         reinterpret_cast<const uint8_t*>(srcData),
+                                         srcSize.width(),
+                                         srcSize.height(),
+                                         srcStride * bytesPerUnit,
+                                         reinterpret_cast<uint8_t*>(dstData),
+                                         dw,
+                                         dh,
+                                         dstStride * bytesPerUnit,
+                                         invXform.m11(),
+                                         invXform.m12(),
+                                         invXform.m21(),
+                                         invXform.m22(),
+                                         invXform.dx(),
+                                         invXform.dy(),
+                                         src32UnitW,
+                                         src32UnitH,
+                                         outsideColor,
+                                         outsideFlags};
+    std::vector<int> rowsToRecompute;
+    if (gpu::transform(gpuParams, rowsToRecompute)) {
+      for (const int dy : rowsToRecompute) {
+        transformGenericLines<StorageUnit, Mixer>(srcData, srcStride, srcSize, dstData, dstStride, invXform, dw,
+                                                  src32UnitW, src32UnitH, outsideColor, outsideFlags, dy, dy + 1);
+      }
+      return;
+    }
   }
-  for (const int dy : rowsToRecompute) {
-    transformGenericLines<StorageUnit, Mixer>(srcData, srcStride, srcSize, dstData, dstStride, invXform, dw, src32UnitW,
-                                              src32UnitH, outsideColor, outsideFlags, dy, dy + 1);
-  }
+  transformGenericLines<StorageUnit, Mixer>(srcData, srcStride, srcSize, dstData, dstStride, invXform, dw, src32UnitW,
+                                            src32UnitH, outsideColor, outsideFlags, 0, dh);
 }  // transformGeneric
 
 template <typename ImageT>
@@ -405,9 +408,9 @@ QImage transform(const QImage& src,
 
         using AccumType = float;
         transformGeneric<uint32_t, ArgbColorMixer<AccumType>>(
-            gpu::TransformFormat::Argb32, (const uint32_t*) srcArgb32.bits(), srcArgb32.bytesPerLine() / 4,
-            srcArgb32.size(), (uint32_t*) dst.bits(), dst.bytesPerLine() / 4, xform, dstRect, outsidePixels.rgba(),
-            outsidePixels.flags(), minMappingArea);
+            std::nullopt, (const uint32_t*) srcArgb32.bits(), srcArgb32.bytesPerLine() / 4, srcArgb32.size(),
+            (uint32_t*) dst.bits(), dst.bytesPerLine() / 4, xform, dstRect, outsidePixels.rgba(), outsidePixels.flags(),
+            minMappingArea);
 
         fixDpiInPlace(dst, src, xform);
         return dst;

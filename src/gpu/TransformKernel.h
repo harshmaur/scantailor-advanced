@@ -37,7 +37,8 @@ struct TransformParams {
 };
 
 /**
- * \brief Runs the transform on the GPU.
+ * \brief Runs the transform on the GPU. Supports Gray8 and Rgb32 only: ARGB32 mixes in float on the CPU,
+ *        which the GPU cannot reproduce bit for bit.
  *
  * \return false if the GPU was not used or failed; the contents of dst are then undefined.
  *         On success, the rows listed in \p rowsToRecompute could not be computed

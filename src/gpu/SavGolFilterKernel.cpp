@@ -9,13 +9,10 @@
 
 #include "Banding.h"
 #include "Device.h"
-#include "Gpu.h"
-#include "Internal.h"
 
 namespace gpu {
 namespace {
 constexpr int GROUP_SIZE = 16;
-constexpr int TILE_WIDTH = GROUP_SIZE * 4;
 
 struct Params {
   qint32 srcStride;
@@ -32,10 +29,9 @@ struct Params {
 bool savGolFilter(const SavGolParams& p) {
   const int kw = p.kernelWidth;
   const int kh = p.kernelHeight;
-  if ((qint64(p.width) * p.height < minSavGolPixels()) || !isEnabled() || (kw < 1) || (kh < 1)
-      || (kw > MAX_SAVGOL_KERNEL_SIZE) || (kh > MAX_SAVGOL_KERNEL_SIZE) || (kw > p.width) || (kh > p.height)
-      || (p.srcBytesPerLine % 4 != 0) || (p.dstBytesPerLine % 4 != 0) || (p.srcBytesPerLine < p.width)
-      || (p.dstBytesPerLine < p.width) || !Device::instance().isAvailable()) {
+  if ((kw < 1) || (kh < 1) || (kw > MAX_SAVGOL_KERNEL_SIZE) || (kh > MAX_SAVGOL_KERNEL_SIZE) || (kw > p.width)
+      || (kh > p.height)
+      || !shouldUseGpu(qint64(p.width) * p.height, 1, p.width, p.srcBytesPerLine, p.width, p.dstBytesPerLine)) {
     return false;
   }
 
@@ -45,8 +41,8 @@ bool savGolFilter(const SavGolParams& p) {
   std::vector<float> coeffs(p.horKernel, p.horKernel + kw);
   coeffs.insert(coeffs.end(), p.vertKernel, p.vertKernel + kh);
 
+  const int maxGroups = Device::instance().maxGroups();
   return Device::instance().run([&](ComputeJob& job) {
-    const int maxGroups = std::min(65535, job.rhi()->resourceLimit(QRhi::MaxThreadGroupsPerDimension));
     if (groupsX > maxGroups) {
       return false;
     }

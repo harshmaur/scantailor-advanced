@@ -15,6 +15,9 @@
 #include <mutex>
 #include <vector>
 
+#include "Gpu.h"
+#include "TransformKernel.h"
+
 #if QT_CONFIG(vulkan) && __has_include(<vulkan/vulkan.h>)
 #define SCANTAILOR_GPU_VULKAN
 class QVulkanInstance;
@@ -29,6 +32,20 @@ struct Binding {
 };
 
 class Device;
+
+/**
+ * \brief Whether a kernel should run on the GPU: the image is large enough, GPU processing is enabled,
+ *        the strides are multiples of 4 bytes that fit the rows, and a device is available.
+ */
+bool shouldUseGpu(qint64 pixels,
+                  int bytesPerPixel,
+                  int srcWidth,
+                  int srcBytesPerLine,
+                  int dstWidth,
+                  int dstBytesPerLine);
+
+/** The .qsb resource path of the variant of \p kernel for \p format. */
+QString shaderPath(const char* kernel, TransformFormat format);
 
 /**
  * \brief The resources of one GPU job. Lives on the device thread for the duration of the job.
@@ -72,7 +89,6 @@ class ComputeJob {
   std::vector<std::unique_ptr<QRhiShaderResourceBindings>> m_bindings;
 };
 
-
 /**
  * \brief The process-wide GPU device. QRhi is owned and used by one dedicated thread.
  *
@@ -83,9 +99,18 @@ class Device {
  public:
   static Device& instance();
 
+  void start();
+
+  void shutdown();
+
+  State state();
+
   bool isAvailable();
 
   QString name();
+
+  /** The maximum number of thread groups per dispatch dimension. Valid while the device is available. */
+  int maxGroups();
 
   /** Returns false if the device is not available or the job failed. */
   bool run(const std::function<bool(ComputeJob&)>& job);
@@ -100,11 +125,9 @@ class Device {
     std::unique_ptr<QRhiComputePipeline> pipeline;
   };
 
-  enum class State { Unknown, Available, Unavailable };
-
   Device();
 
-  void shutdown();
+  bool startThread();
 
   void threadLoop();
 
@@ -123,6 +146,7 @@ class Device {
   bool m_stopping = false;
   State m_state = State::Unknown;
   QString m_name;
+  int m_maxGroups = 0;
 
   // Accessed only on the device thread.
 #ifdef SCANTAILOR_GPU_VULKAN

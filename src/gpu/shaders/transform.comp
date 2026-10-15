@@ -1,7 +1,7 @@
 #version 450
 
 // GPU port of transformGeneric() in src/imageproc/Transform.cpp. Compiled once per pixel format:
-// FORMAT_GRAY (8 bit, 4 pixels per uint), FORMAT_RGB (integer mixing) and FORMAT_ARGB (float mixing).
+// FORMAT_GRAY (8 bit, 4 pixels per uint) and FORMAT_RGB.
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -75,40 +75,7 @@ uint fetch(int x, int y) {
 #endif
 }
 
-#if defined(FORMAT_ARGB)
-float accA;
-float accR;
-float accG;
-float accB;
-
-void mixReset() {
-  accA = 0.0;
-  accR = 0.0;
-  accG = 0.0;
-  accB = 0.0;
-}
-
-void mixAdd(uint c, uint weight) {
-  float alphaWeight = float((c >> 24) & 0xffu) * float(weight);
-  accA += alphaWeight;
-  accR += float((c >> 16) & 0xffu) * alphaWeight;
-  accG += float((c >> 8) & 0xffu) * alphaWeight;
-  accB += float(c & 0xffu) * alphaWeight;
-}
-
-uint mixResult(uint totalWeight) {
-  if (accA == 0.0) {
-    return 0u;
-  }
-  float scale1 = 1.0 / float(totalWeight);
-  float scale2 = 1.0 / accA;
-  uint a = uint(0.5 + accA * scale1);
-  uint r = uint(0.5 + accR * scale2);
-  uint g = uint(0.5 + accG * scale2);
-  uint b = uint(0.5 + accB * scale2);
-  return (a << 24) | (r << 16) | (g << 8) | b;
-}
-#elif defined(FORMAT_RGB)
+#ifdef FORMAT_RGB
 uint accR;
 uint accG;
 uint accB;

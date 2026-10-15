@@ -5,14 +5,18 @@
 #define SCANTAILOR_GPU_GPU_H_
 
 #include <QString>
-#include <QtGlobal>
 
+/**
+ * GPU kernels must produce exactly the CPU result: the output is binarized afterwards,
+ * so a one level difference can flip pixels and make the output depend on the machine.
+ */
 namespace gpu {
+enum class State { Unknown, Available, Unavailable };
+
 /**
  * \brief Enables or disables GPU processing for the whole process.
  *
- * The SCANTAILOR_GPU environment variable overrides this:
- * "0" forces GPU processing off, "1" forces it on.
+ * SCANTAILOR_GPU=0 turns GPU processing off regardless of this setting.
  * Software renderers are only used if SCANTAILOR_GPU_SOFTWARE is "1".
  * SCANTAILOR_GPU_BACKEND ("metal", "d3d12", "d3d11" or "vulkan") restricts the graphics API.
  */
@@ -21,9 +25,21 @@ void setEnabled(bool enabled);
 bool isEnabled();
 
 /**
- * \brief Returns true if a GPU device with compute support could be created.
+ * \brief Starts creating the GPU device in the background.
  *
- * The device is created on the first call, which may take a while.
+ * Call once a QGuiApplication exists. The device is released when the application quits.
+ */
+void start();
+
+/**
+ * \brief Whether a GPU device with compute support exists. Does not block.
+ */
+State state();
+
+/**
+ * \brief Like state(), but waits until the device has been created.
+ *
+ * Returns false without creating the device if no QGuiApplication exists yet.
  */
 bool isAvailable();
 
@@ -31,45 +47,5 @@ bool isAvailable();
  * \brief The name of the GPU device and its graphics API, or an empty string if not available.
  */
 QString deviceName();
-
-namespace testing {
-/**
- * \brief Overrides the maximum size of a single GPU buffer. 0 restores the default.
- */
-void setMaxBufferBytes(qint64 bytes);
-
-/**
- * \brief Overrides the minimum number of output pixels for which transform() uses the GPU.
- *        A negative value restores the default.
- */
-void setMinTransformPixels(qint64 pixels);
-
-/**
- * \brief Overrides the minimum number of output pixels for which RasterDewarper uses the GPU.
- *        A negative value restores the default.
- */
-void setMinDewarpPixels(qint64 pixels);
-
-/**
- * \brief Overrides the minimum number of image pixels for which savGolFilter() uses the GPU.
- *        A negative value restores the default.
- */
-void setMinSavGolPixels(qint64 pixels);
-
-/**
- * \brief The number of compute dispatches that completed successfully.
- */
-qint64 dispatchCount();
-
-/**
- * \brief The number of output rows that GPU kernels left to the CPU.
- */
-qint64 recomputedRows();
-
-/**
- * \brief The number of output columns that the dewarp kernel left to the CPU.
- */
-qint64 recomputedColumns();
-}  // namespace testing
 }  // namespace gpu
 #endif  // SCANTAILOR_GPU_GPU_H_

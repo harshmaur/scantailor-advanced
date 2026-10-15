@@ -9,13 +9,11 @@
 
 #include "Banding.h"
 #include "Device.h"
-#include "Gpu.h"
 #include "Internal.h"
 
 namespace gpu {
 namespace {
 constexpr int GROUP_SIZE = 16;
-constexpr int MAX_GROUPS = 65535;
 
 struct Params {
   qint32 srcWidth;
@@ -31,18 +29,6 @@ struct Params {
   float maxRight;
   float maxBottom;
 };
-
-const char* shaderFor(const TransformFormat format) {
-  switch (format) {
-    case TransformFormat::Gray8:
-      return ":/gpu/dewarp_gray.comp.qsb";
-    case TransformFormat::Rgb32:
-      return ":/gpu/dewarp_rgb.comp.qsb";
-    case TransformFormat::Argb32:
-      return ":/gpu/dewarp_argb.comp.qsb";
-  }
-  return nullptr;
-}
 
 bool dewarpBand(const DewarpParams& p,
                 const Band& band,
@@ -60,17 +46,13 @@ bool dewarpBand(const DewarpParams& p,
   const quint32 statusBytes = quint32(dw * sizeof(quint32));
 
   return Device::instance().run([&](ComputeJob& job) {
-    const int maxGroups = job.rhi()->resourceLimit(QRhi::MaxThreadGroupsPerDimension);
-    if ((groupsX > maxGroups) || (groupsY > maxGroups)) {
-      return false;
-    }
     const std::vector<Binding> bindings = {{Access::Uniform, job.buffer(Access::Uniform, sizeof(Params))},
                                            {Access::Read, job.buffer(Access::Read, srcBytes)},
                                            {Access::Write, job.buffer(Access::Write, dstBytes)},
                                            {Access::Read, job.buffer(Access::Read, gridBytes)},
                                            {Access::ReadWrite, job.buffer(Access::ReadWrite, statusBytes)}};
     QRhiShaderResourceBindings* srb = job.bindings(bindings);
-    QRhiComputePipeline* pipeline = job.pipeline(QLatin1String(shaderFor(p.format)), bindings);
+    QRhiComputePipeline* pipeline = job.pipeline(shaderPath("dewarp", p.format), bindings);
     if (!srb || !pipeline) {
       return false;
     }
@@ -124,16 +106,20 @@ bool dewarp(const DewarpParams& p, std::vector<int>& columnsToRecompute) {
   const int dh = p.dstHeight;
   const int sh = p.srcHeight;
   const int bytesPerPixel = (p.format == TransformFormat::Gray8) ? 1 : 4;
-  if ((qint64(dw) * dh < minDewarpPixels()) || (dw <= 0) || (dh <= 0) || !isEnabled() || (p.srcBytesPerLine % 4 != 0)
-      || (p.dstBytesPerLine % 4 != 0) || (p.srcBytesPerLine < p.srcWidth * bytesPerPixel)
-      || (p.dstBytesPerLine < dw * bytesPerPixel) || !Device::instance().isAvailable()) {
+  if ((dw <= 0) || (dh <= 0)
+      || !shouldUseGpu(qint64(dw) * dh, bytesPerPixel, p.srcWidth, p.srcBytesPerLine, dw, p.dstBytesPerLine)) {
+    return false;
+  }
+  const int maxGroups = Device::instance().maxGroups();
+  const int itemsPerRow = (p.format == TransformFormat::Gray8) ? (dw + 3) / 4 : dw;
+  if ((itemsPerRow + GROUP_SIZE - 1) / GROUP_SIZE > maxGroups) {
     return false;
   }
 
   const int gridStride = dw + 1;
   const qint64 gridBytesPerRow = qint64(gridStride) * 2 * sizeof(float);
   const int maxRowsPerBand
-      = static_cast<int>(std::min<qint64>(qint64(MAX_GROUPS) * GROUP_SIZE, maxBufferBytes() / gridBytesPerRow - 1));
+      = static_cast<int>(std::min<qint64>(qint64(maxGroups) * GROUP_SIZE, maxBufferBytes() / gridBytesPerRow - 1));
   if (maxRowsPerBand < 1) {
     return false;
   }
@@ -186,7 +172,7 @@ bool dewarp(const DewarpParams& p, std::vector<int>& columnsToRecompute) {
       columnsToRecompute.push_back(x);
     }
   }
-  countRecomputedColumns(static_cast<qint64>(columnsToRecompute.size()));
+  countRecomputed(static_cast<qint64>(columnsToRecompute.size()));
   return true;
 }
 }  // namespace gpu

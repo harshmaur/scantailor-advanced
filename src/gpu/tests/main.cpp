@@ -20,11 +20,17 @@ struct GuiApplicationFixture {
     }
 #endif
     app = std::make_unique<QGuiApplication>(argc, argv);
-    if (gpu::isAvailable()) {
+  }
+
+  void setup() {
+    const bool available = gpu::isAvailable();
+    if (available) {
       std::printf("GPU device: %s\n", qPrintable(gpu::deviceName()));
     } else {
       std::fprintf(stderr, "No GPU device with compute support: the GPU comparison tests are skipped.\n");
     }
+    BOOST_REQUIRE_MESSAGE(available || (qgetenv("SCANTAILOR_GPU_REQUIRED") != "1"),
+                          "SCANTAILOR_GPU_REQUIRED=1 but no GPU device with compute support");
   }
 
   int argc = 1;
@@ -34,4 +40,4 @@ struct GuiApplicationFixture {
 };
 }  // namespace
 
-BOOST_GLOBAL_FIXTURE(GuiApplicationFixture);
+BOOST_TEST_GLOBAL_FIXTURE(GuiApplicationFixture);

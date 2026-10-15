@@ -8,6 +8,7 @@
 #include <tiff.h>
 
 #include <QtCore/QDir>
+#include <QtCore/QTimer>
 #include <QtWidgets/QMessageBox>
 #include <cmath>
 
@@ -30,15 +31,29 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     ui.openglDeviceLabel->setText(openglDevicePattern.arg(OpenGLSupport::deviceName()));
   }
 
-  if (!gpu::isAvailable()) {
-    ui.enableGpuCb->setChecked(false);
-    ui.enableGpuCb->setEnabled(false);
-    ui.gpuDeviceLabel->setEnabled(false);
-    ui.gpuDeviceLabel->setText(tr("Not available"));
-  } else {
-    ui.enableGpuCb->setChecked(settings.isGpuProcessingEnabled());
-    ui.gpuDeviceLabel->setText(ui.gpuDeviceLabel->text().arg(gpu::deviceName()));
-  }
+  ui.enableGpuCb->setChecked(settings.isGpuProcessingEnabled());
+  const QString gpuDevicePattern = ui.gpuDeviceLabel->text();
+  auto* gpuStateTimer = new QTimer(this);
+  const auto updateGpuState = [this, gpuDevicePattern, gpuStateTimer] {
+    switch (gpu::state()) {
+      case gpu::State::Unknown:
+        ui.gpuDeviceLabel->setText(tr("Checking…"));
+        return;
+      case gpu::State::Available:
+        ui.gpuDeviceLabel->setText(gpuDevicePattern.arg(gpu::deviceName()));
+        break;
+      case gpu::State::Unavailable:
+        ui.enableGpuCb->setChecked(false);
+        ui.enableGpuCb->setEnabled(false);
+        ui.gpuDeviceLabel->setEnabled(false);
+        ui.gpuDeviceLabel->setText(tr("Not available"));
+        break;
+    }
+    gpuStateTimer->stop();
+  };
+  connect(gpuStateTimer, &QTimer::timeout, this, updateGpuState);
+  gpuStateTimer->start(200);
+  updateGpuState();
 
   ui.colorSchemeBox->addItem(tr("Dark"), "dark");
   ui.colorSchemeBox->addItem(tr("Light"), "light");

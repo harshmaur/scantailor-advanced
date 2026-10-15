@@ -9,7 +9,6 @@
 
 #include "Banding.h"
 #include "Device.h"
-#include "Gpu.h"
 #include "Internal.h"
 
 namespace gpu {
@@ -82,18 +81,6 @@ bool encodeCoords(const double factor,
   out[4] = x[2] | (y[2] << 1);
   return true;
 }
-
-const char* shaderFor(const TransformFormat format) {
-  switch (format) {
-    case TransformFormat::Gray8:
-      return ":/gpu/transform_gray.comp.qsb";
-    case TransformFormat::Rgb32:
-      return ":/gpu/transform_rgb.comp.qsb";
-    case TransformFormat::Argb32:
-      return ":/gpu/transform_argb.comp.qsb";
-  }
-  return nullptr;
-}
 }  // namespace
 
 bool transform(const TransformParams& p, std::vector<int>& rowsToRecompute) {
@@ -101,9 +88,7 @@ bool transform(const TransformParams& p, std::vector<int>& rowsToRecompute) {
   const int dw = p.dstWidth;
   const int dh = p.dstHeight;
   const int bytesPerPixel = (p.format == TransformFormat::Gray8) ? 1 : 4;
-  if ((qint64(dw) * dh < minTransformPixels()) || !isEnabled() || (p.srcBytesPerLine % 4 != 0)
-      || (p.dstBytesPerLine % 4 != 0) || (p.srcBytesPerLine < p.srcWidth * bytesPerPixel)
-      || (p.dstBytesPerLine < dw * bytesPerPixel) || !Device::instance().isAvailable()) {
+  if (!shouldUseGpu(qint64(dw) * dh, bytesPerPixel, p.srcWidth, p.srcBytesPerLine, dw, p.dstBytesPerLine)) {
     return false;
   }
 
@@ -139,8 +124,8 @@ bool transform(const TransformParams& p, std::vector<int>& rowsToRecompute) {
   const int itemsPerRow = (p.format == TransformFormat::Gray8) ? (dw + 3) / 4 : dw;
   const int groupsX = (itemsPerRow + GROUP_SIZE - 1) / GROUP_SIZE;
 
+  const int maxGroups = Device::instance().maxGroups();
   const bool ok = Device::instance().run([&](ComputeJob& job) {
-    const int maxGroups = std::min(65535, job.rhi()->resourceLimit(QRhi::MaxThreadGroupsPerDimension));
     if (groupsX > maxGroups) {
       return false;
     }
@@ -164,7 +149,7 @@ bool transform(const TransformParams& p, std::vector<int>& rowsToRecompute) {
            {Access::Read, job.buffer(Access::Read, quint32(maxBandRows * COORD_WORDS * sizeof(quint32)))},
            {Access::ReadWrite, job.buffer(Access::ReadWrite, quint32((maxBandRows + 1) * sizeof(quint32)))}};
     QRhiShaderResourceBindings* srb = job.bindings(bindings);
-    QRhiComputePipeline* pipeline = job.pipeline(QLatin1String(shaderFor(p.format)), bindings);
+    QRhiComputePipeline* pipeline = job.pipeline(shaderPath("transform", p.format), bindings);
     if (!srb || !pipeline) {
       return false;
     }
@@ -236,7 +221,7 @@ bool transform(const TransformParams& p, std::vector<int>& rowsToRecompute) {
     rowsToRecompute.clear();
     return false;
   }
-  countRecomputedRows(static_cast<qint64>(rowsToRecompute.size()));
+  countRecomputed(static_cast<qint64>(rowsToRecompute.size()));
   return true;
 }
 }  // namespace gpu

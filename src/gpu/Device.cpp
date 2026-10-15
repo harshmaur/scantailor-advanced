@@ -12,6 +12,7 @@
 #include <QStringList>
 #include <QThread>
 #include <QVarLengthArray>
+#include <algorithm>
 #include <exception>
 
 #ifdef SCANTAILOR_GPU_VULKAN
@@ -50,19 +51,28 @@ Device& Device::instance() {
   return *device;
 }
 
-bool Device::isAvailable() {
-  if (isForcedOff()) {
-    return false;
+void Device::start() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (!isForcedOff()) {
+    startThread();
   }
-  {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_state != State::Unknown) {
-      return m_state == State::Available;
-    }
+}
+
+State Device::state() {
+  if (isForcedOff()) {
+    return State::Unavailable;
+  }
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_state;
+}
+
+bool Device::isAvailable() {
+  const State current = state();
+  if (current != State::Unknown) {
+    return current == State::Available;
   }
   run([](ComputeJob&) { return true; });
-  std::lock_guard<std::mutex> lock(m_mutex);
-  return m_state == State::Available;
+  return state() == State::Available;
 }
 
 QString Device::name() {
@@ -73,10 +83,15 @@ QString Device::name() {
   return m_name;
 }
 
+int Device::maxGroups() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_maxGroups;
+}
+
 bool Device::run(const std::function<bool(ComputeJob&)>& job) {
   bool result = false;
   std::function<void()> fn = [this, &job, &result] {
-    if (!m_rhi && !initialize()) {
+    if (!m_rhi) {
       return;
     }
     {
@@ -96,25 +111,29 @@ bool Device::run(const std::function<bool(ComputeJob&)>& job) {
   };
 
   std::unique_lock<std::mutex> lock(m_mutex);
-  if ((m_state == State::Unavailable) || m_stopping) {
+  if ((m_state == State::Unavailable) || m_stopping || !startThread()) {
     return false;
   }
-  if (!m_thread) {
-    if (!qobject_cast<QGuiApplication*>(QCoreApplication::instance())) {
-      lock.unlock();
-      markUnavailable(QStringLiteral("no QGuiApplication"));
-      return false;
-    }
-    m_thread = std::make_unique<Thread>(*this);
-    m_thread->start();
-    qAddPostRoutine([] { Device::instance().shutdown(); });
-  }
-
   Task task{fn};
   m_tasks.push_back(&task);
   m_cond.notify_all();
   m_cond.wait(lock, [&task] { return task.done; });
   return result;
+}
+
+bool Device::startThread() {
+  if (m_thread) {
+    return true;
+  }
+  auto* app = qobject_cast<QGuiApplication*>(QCoreApplication::instance());
+  if (!app || m_stopping) {
+    return false;
+  }
+  m_thread = std::make_unique<Thread>(*this);
+  m_thread->start();
+  QObject::connect(app, &QCoreApplication::aboutToQuit, [] { Device::instance().shutdown(); });
+  qAddPostRoutine([] { Device::instance().shutdown(); });
+  return true;
 }
 
 void Device::shutdown() {
@@ -124,13 +143,15 @@ void Device::shutdown() {
       return;
     }
     m_stopping = true;
-    m_state = State::Unavailable;
   }
   m_cond.notify_all();
   m_thread->wait();
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_state = State::Unavailable;
 }
 
 void Device::threadLoop() {
+  initialize();
   std::unique_lock<std::mutex> lock(m_mutex);
   while (true) {
     m_cond.wait(lock, [this] { return m_stopping || !m_tasks.empty(); });
@@ -235,6 +256,7 @@ bool Device::initialize() {
 
   std::lock_guard<std::mutex> lock(m_mutex);
   m_state = State::Available;
+  m_maxGroups = std::min(65535, m_rhi->resourceLimit(QRhi::MaxThreadGroupsPerDimension));
   m_name = QStringLiteral("%1 (%2)").arg(QString::fromUtf8(m_rhi->driverInfo().deviceName),
                                          QLatin1String(m_rhi->backendName()));
   return true;
@@ -393,6 +415,32 @@ bool ComputeJob::dispatch(QRhiComputePipeline* const pipeline,
   }
   countDispatch();
   return true;
+}
+
+bool shouldUseGpu(const qint64 pixels,
+                  const int bytesPerPixel,
+                  const int srcWidth,
+                  const int srcBytesPerLine,
+                  const int dstWidth,
+                  const int dstBytesPerLine) {
+  return (pixels >= minPixels()) && isEnabled() && (srcBytesPerLine % 4 == 0) && (dstBytesPerLine % 4 == 0)
+         && (srcBytesPerLine >= srcWidth * bytesPerPixel) && (dstBytesPerLine >= dstWidth * bytesPerPixel)
+         && Device::instance().isAvailable();
+}
+
+QString shaderPath(const char* kernel, const TransformFormat format) {
+  const char* const suffix = (format == TransformFormat::Gray8)   ? "gray"
+                             : (format == TransformFormat::Rgb32) ? "rgb"
+                                                                  : "argb";
+  return QStringLiteral(":/gpu/%1_%2.comp.qsb").arg(QLatin1String(kernel), QLatin1String(suffix));
+}
+
+void start() {
+  Device::instance().start();
+}
+
+State state() {
+  return Device::instance().state();
 }
 
 bool isAvailable() {

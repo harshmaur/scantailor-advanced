@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "Gpu.h"
+#include "Internal.h"
 #include "TestImages.h"
 
 using imageproc::OutsidePixels;
@@ -44,10 +45,10 @@ Timing timeTransform(const QImage& src, const QTransform& xform, const bool useG
 
 void benchPage(const char* name, const QImage& src, const QTransform& xform, const int runs) {
   const Timing cpu = timeTransform(src, xform, false, runs);
-  const qint64 recomputedBefore = gpu::testing::recomputedRows();
+  const qint64 recomputedBefore = gpu::testing::recomputedCount();
   const qint64 dispatchesBefore = gpu::testing::dispatchCount();
   const Timing gpu = timeTransform(src, xform, true, runs);
-  const qint64 recomputed = (gpu::testing::recomputedRows() - recomputedBefore) / runs;
+  const qint64 recomputed = (gpu::testing::recomputedCount() - recomputedBefore) / runs;
   const qint64 dispatches = (gpu::testing::dispatchCount() - dispatchesBefore) / runs;
   const gpu::tests::ImageDiff diff = gpu::tests::compareImages(cpu.result, gpu.result);
   std::printf(
@@ -86,10 +87,10 @@ std::vector<QPointF> pageCurve(const QImage& src, const double y, const double s
 void benchDewarp(const char* name, const QImage& src, const int runs) {
   const dewarping::CylindricalSurfaceDewarper dewarper(pageCurve(src, 0.08, 0.03), pageCurve(src, 0.92, -0.02), 2.0);
   const Timing cpu = timeDewarp(src, dewarper, false, runs);
-  const qint64 recomputedBefore = gpu::testing::recomputedColumns();
+  const qint64 recomputedBefore = gpu::testing::recomputedCount();
   const qint64 dispatchesBefore = gpu::testing::dispatchCount();
   const Timing gpu = timeDewarp(src, dewarper, true, runs);
-  const qint64 recomputed = (gpu::testing::recomputedColumns() - recomputedBefore) / runs;
+  const qint64 recomputed = (gpu::testing::recomputedCount() - recomputedBefore) / runs;
   const qint64 dispatches = (gpu::testing::dispatchCount() - dispatchesBefore) / runs;
   const gpu::tests::ImageDiff diff = gpu::tests::compareImages(cpu.result, gpu.result);
   std::printf(
@@ -138,8 +139,7 @@ int main(int argc, char** argv) {
   }
 
   const QTransform rotation = QTransform().rotate(1.7);
-  gpu::testing::setMinTransformPixels(0);
-  gpu::testing::setMinDewarpPixels(0);
+  gpu::testing::setMinPixels(0);
   {
     const QImage warmup = gpu::tests::textLikeImage(QImage::Format_RGB32, 64, 64, 1);
     timer.restart();
@@ -168,7 +168,6 @@ int main(int argc, char** argv) {
     benchDewarp("gray", gpu::tests::textLikeImage(QImage::Format_Indexed8, side, side, side), runs);
   }
 
-  gpu::testing::setMinSavGolPixels(0);
   std::printf("savGolFilter 11x11, degree 4 (600 DPI output smoothing), median of %d runs:\n", runs);
   benchSavGol(gpu::tests::textLikeImage(QImage::Format_Indexed8, 5100, 6600, 9), runs);
   for (const int side : {256, 512, 1024, 2048}) {

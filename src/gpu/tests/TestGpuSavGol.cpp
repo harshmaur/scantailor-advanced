@@ -6,31 +6,21 @@
 #include <QImage>
 #include <boost/test/unit_test.hpp>
 
-#include "Gpu.h"
+#include "Internal.h"
 #include "TestImages.h"
 
 namespace gpu {
 namespace tests {
 namespace {
-struct GpuAvailable {
-  boost::test_tools::assertion_result operator()(boost::unit_test::test_unit_id) const {
-    boost::test_tools::assertion_result result(isAvailable());
-    if (!result) {
-      result.message() << "no GPU device with compute support, skipping the GPU tests";
-    }
-    return result;
-  }
-};
-
 struct SavGolSettingsFixture {
   SavGolSettingsFixture() {
     setEnabled(true);
-    testing::setMinSavGolPixels(0);
+    testing::setMinPixels(0);
   }
 
   ~SavGolSettingsFixture() {
     setEnabled(true);
-    testing::setMinSavGolPixels(-1);
+    testing::setMinPixels(-1);
     testing::setMaxBufferBytes(0);
   }
 };
@@ -85,18 +75,11 @@ void checkGpuMatchesCpu(const QImage& src, const Window& window) {
 BOOST_AUTO_TEST_SUITE(GpuSavGolEnvironmentTestSuite)
 
 BOOST_FIXTURE_TEST_CASE(test_savgol_env_off_uses_cpu, SavGolSettingsFixture) {
-  const QByteArray old = qgetenv("SCANTAILOR_GPU");
-  qputenv("SCANTAILOR_GPU", "0");
+  const EnvVar env("SCANTAILOR_GPU", "0");
   const QImage src = textLikeImage(QImage::Format_Indexed8, 101, 67, 1);
   const qint64 dispatches = testing::dispatchCount();
   const QImage result = imageproc::savGolFilter(src, QSize(11, 11), 4, 4);
   BOOST_CHECK_EQUAL(testing::dispatchCount(), dispatches);
-  if (old.isNull()) {
-    qunsetenv("SCANTAILOR_GPU");
-  } else {
-    qputenv("SCANTAILOR_GPU", old);
-  }
-
   setEnabled(false);
   BOOST_CHECK_EQUAL(compareImages(imageproc::savGolFilter(src, QSize(11, 11), 4, 4), result).mismatches, 0);
 }
@@ -106,7 +89,7 @@ BOOST_AUTO_TEST_SUITE_END()
 BOOST_AUTO_TEST_SUITE(GpuSavGolTestSuite, *boost::unit_test::precondition(GpuAvailable()))
 
 BOOST_FIXTURE_TEST_CASE(test_savgol_min_size_uses_cpu, SavGolSettingsFixture) {
-  testing::setMinSavGolPixels(10000);
+  testing::setMinPixels(10000);
   const QImage src = randomImage(QImage::Format_Indexed8, 99, 99, 2);
   const qint64 dispatches = testing::dispatchCount();
   imageproc::savGolFilter(src, QSize(5, 5), 3, 3);

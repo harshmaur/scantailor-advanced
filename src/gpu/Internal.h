@@ -11,16 +11,29 @@ bool isForcedOff();
 
 qint64 maxBufferBytes();
 
-qint64 minTransformPixels();
-
-qint64 minDewarpPixels();
-
-qint64 minSavGolPixels();
+qint64 minPixels();
 
 void countDispatch();
 
-void countRecomputedRows(qint64 rows);
+void countRecomputed(qint64 count);
 
-void countRecomputedColumns(qint64 columns);
+namespace testing {
+/**
+ * \brief Overrides the maximum size of a single GPU buffer. 0 restores the default.
+ */
+void setMaxBufferBytes(qint64 bytes);
+
+/**
+ * \brief Overrides the minimum number of pixels for which the GPU is used. A negative value restores the default.
+ */
+void setMinPixels(qint64 pixels);
+
+qint64 dispatchCount();
+
+/**
+ * \brief The number of output rows or columns that GPU kernels left to the CPU.
+ */
+qint64 recomputedCount();
+}  // namespace testing
 }  // namespace gpu
 #endif  // SCANTAILOR_GPU_INTERNAL_H_

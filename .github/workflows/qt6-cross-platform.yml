@@ -2,6 +2,7 @@ name: Qt6 cross-platform
 
 on:
   push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -107,9 +108,7 @@ jobs:
           QT_QPA_PLATFORM: xcb
           SCANTAILOR_GPU_SOFTWARE: "1"
           SCANTAILOR_GPU_REQUIRED: "1"
-        run: |
-          xvfb-run -a build/gpu_tests --log_level=message --report_level=short
-          xvfb-run -a build/gpu_bench 3
+        run: xvfb-run -a build/gpu_tests --log_level=message --report_level=short
 
       - name: GPU tests (macOS, Metal)
         if: runner.os == 'macOS'
@@ -127,9 +126,7 @@ jobs:
           SCANTAILOR_GPU_REQUIRED: "1"
           SCANTAILOR_GPU_BACKEND: d3d12
         shell: bash
-        run: |
-          build/gpu_tests --log_level=message --report_level=short
-          build/gpu_bench 3
+        run: build/gpu_tests --log_level=message --report_level=short
 
       - name: GPU tests (Windows, Direct3D 11 on WARP)
         if: runner.os == 'Windows'
@@ -138,9 +135,7 @@ jobs:
           SCANTAILOR_GPU_REQUIRED: "1"
           SCANTAILOR_GPU_BACKEND: d3d11
         shell: bash
-        run: |
-          build/gpu_tests --log_level=message --report_level=short
-          build/gpu_bench 3
+        run: build/gpu_tests --log_level=message --report_level=short
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
