@@ -2,6 +2,7 @@
 // Use of this source code is governed by the GNU GPLv3 license that can be found in the LICENSE file.
 
 #include "Gpu.h"
+#include "SavGolFilterKernel.h"
 #include "TransformKernel.h"
 
 namespace gpu {
@@ -14,6 +15,10 @@ QString deviceName() {
 }
 
 bool transform(const TransformParams&, std::vector<int>&) {
+  return false;
+}
+
+bool savGolFilter(const SavGolParams&) {
   return false;
 }
 }  // namespace gpu

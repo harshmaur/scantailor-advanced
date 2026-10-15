@@ -13,6 +13,8 @@ qint64 maxBufferBytes();
 
 qint64 minTransformPixels();
 
+qint64 minSavGolPixels();
+
 void countDispatch();
 
 void countRecomputedRows(qint64 rows);

@@ -3,6 +3,8 @@
 
 #include "SavGolFilter.h"
 
+#include <gpu/SavGolFilterKernel.h>
+
 #include <stdexcept>
 
 #include "Grayscale.h"
@@ -148,45 +150,49 @@ QImage savGolFilterGrayToGray(const QImage& src, const QSize& windowSize, const 
   const SavGolKernel horKernel(QSize(windowSize.width(), 1), QPoint(kCenter.x(), 0), horDegree, 0);
   const SavGolKernel vertKernel(QSize(1, windowSize.height()), QPoint(0, kCenter.y()), 0, vertDegree);
 
-  const int shift = kw - 1;
+  const gpu::SavGolParams gpuParams{srcData, srcBpl, dstData, dstBpl,           width,
+                                    height,  kw,     kh,      horKernel.data(), vertKernel.data()};
+  if (!gpu::savGolFilter(gpuParams)) {
+    const int shift = kw - 1;
 
-  // Allocate a 16-byte aligned temporary storage.
-  // That may help the compiler to emit efficient SSE code.
-  const int tempStride = (width - shift + 3) & ~3;
-  AlignedArray<float, 4> tempArray(tempStride * height);
-  // Horizontal pass.
-  srcLine = srcData - shift;
-  float* tempLine = tempArray.data() - shift;
-  for (int y = 0; y < height; ++y) {
-    for (int i = shift; i < width; ++i) {
-      float sum = 0.0f;
+    // Allocate a 16-byte aligned temporary storage.
+    // That may help the compiler to emit efficient SSE code.
+    const int tempStride = (width - shift + 3) & ~3;
+    AlignedArray<float, 4> tempArray(tempStride * height);
+    // Horizontal pass.
+    srcLine = srcData - shift;
+    float* tempLine = tempArray.data() - shift;
+    for (int y = 0; y < height; ++y) {
+      for (int i = shift; i < width; ++i) {
+        float sum = 0.0f;
 
-      const uint8_t* src = srcLine + i;
-      for (int j = 0; j < kw; ++j) {
-        sum += src[j] * horKernel[j];
+        const uint8_t* src = srcLine + i;
+        for (int j = 0; j < kw; ++j) {
+          sum += src[j] * horKernel[j];
+        }
+        tempLine[i] = sum;
       }
-      tempLine[i] = sum;
+      tempLine += tempStride;
+      srcLine += srcBpl;
     }
-    tempLine += tempStride;
-    srcLine += srcBpl;
-  }
-  // Vertical pass.
-  dstLine = dstData + kTop * dstBpl + kLeft - shift;
-  tempLine = tempArray.data() - shift;
-  for (int y = kTop; y < height - kBottom; ++y) {
-    for (int i = shift; i < width; ++i) {
-      float sum = 0.0f;
+    // Vertical pass.
+    dstLine = dstData + kTop * dstBpl + kLeft - shift;
+    tempLine = tempArray.data() - shift;
+    for (int y = kTop; y < height - kBottom; ++y) {
+      for (int i = shift; i < width; ++i) {
+        float sum = 0.0f;
 
-      float* tmp = tempLine + i;
-      for (int j = 0; j < kh; ++j, tmp += tempStride) {
-        sum += *tmp * vertKernel[j];
+        float* tmp = tempLine + i;
+        for (int j = 0; j < kh; ++j, tmp += tempStride) {
+          sum += *tmp * vertKernel[j];
+        }
+        const auto val = static_cast<int>(sum);
+        dstLine[i] = static_cast<uint8_t>(qBound(0, val, 255));
       }
-      const auto val = static_cast<int>(sum);
-      dstLine[i] = static_cast<uint8_t>(qBound(0, val, 255));
-    }
 
-    tempLine += tempStride;
-    dstLine += dstBpl;
+      tempLine += tempStride;
+      dstLine += dstBpl;
+    }
   }
 #endif  // if 0
 

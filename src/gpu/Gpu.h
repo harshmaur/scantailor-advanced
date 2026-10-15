@@ -44,6 +44,12 @@ void setMaxBufferBytes(qint64 bytes);
 void setMinTransformPixels(qint64 pixels);
 
 /**
+ * \brief Overrides the minimum number of image pixels for which savGolFilter() uses the GPU.
+ *        A negative value restores the default.
+ */
+void setMinSavGolPixels(qint64 pixels);
+
+/**
  * \brief The number of compute dispatches that completed successfully.
  */
 qint64 dispatchCount();

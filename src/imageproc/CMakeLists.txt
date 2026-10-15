@@ -58,6 +58,12 @@ add_library(imageproc STATIC ${sources})
 target_link_libraries(imageproc PUBLIC foundation math gpu)
 target_include_directories(imageproc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
+# Fused multiply-adds would make the Savitzky-Golay result depend on the compiler and target and differ from the GPU.
+# MSVC does not contract under its default /fp:precise.
+if (NOT MSVC)
+  set_source_files_properties(SavGolFilter.cpp SavGolKernel.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
+endif()
+
 if (BUILD_TESTS)
   add_subdirectory(tests)
 endif()
