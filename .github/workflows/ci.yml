@@ -1,11 +1,10 @@
-# CI: build on push and PR to main/master
+# CI: build on push to main/master and on every PR
 name: CI
 
 on:
   push:
     branches: [master, main]
   pull_request:
-    branches: [master, main]
 
 jobs:
   build-linux:
