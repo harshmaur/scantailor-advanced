@@ -54,7 +54,7 @@ BOOST_AUTO_TEST_CASE(test_ordering) {
 BOOST_AUTO_TEST_CASE(test_from_qfileinfo) {
   const QFileInfo info("/absolute/path/image.jpg");
   const ImageId id(info, 0);
-  BOOST_CHECK(id.filePath() == "/absolute/path/image.jpg");
+  BOOST_CHECK(id.filePath() == info.absoluteFilePath());
 }
 
 BOOST_AUTO_TEST_CASE(test_setters) {
