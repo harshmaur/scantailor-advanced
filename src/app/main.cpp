@@ -9,6 +9,7 @@
 #include <core/FontIconPack.h>
 #include <core/IconProvider.h>
 #include <core/StyledIconPack.h>
+#include <gpu/Gpu.h>
 
 #include <QGuiApplication>
 #include <QSettings>
@@ -51,6 +52,8 @@ int main(int argc, char* argv[]) {
   QSettings settings;
 
   app.installLanguage(ApplicationSettings::getInstance().getLanguage());
+  gpu::setEnabled(ApplicationSettings::getInstance().isGpuProcessingEnabled());
+  gpu::start();
 
   {
     std::unique_ptr<ColorScheme> scheme
