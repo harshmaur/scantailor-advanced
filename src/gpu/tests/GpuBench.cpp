@@ -54,6 +54,7 @@ void benchPage(const char* name, const QImage& src, const QTransform& xform, con
       src.width(), src.height(), cpu.medianMs, gpu.medianMs, static_cast<long long>(dispatches),
       static_cast<long long>(recomputed), static_cast<long long>(diff.mismatches), diff.maxChannelDiff);
 }
+
 Timing timeDewarp(const QImage& src,
                   const dewarping::CylindricalSurfaceDewarper& dewarper,
                   const bool useGpu,
