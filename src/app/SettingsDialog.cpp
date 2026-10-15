@@ -4,6 +4,7 @@
 #include "SettingsDialog.h"
 
 #include <core/ApplicationSettings.h>
+#include <gpu/Gpu.h>
 #include <tiff.h>
 
 #include <QtCore/QDir>
@@ -27,6 +28,16 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     ui.enableOpenglCb->setChecked(settings.isOpenGlEnabled());
     const QString openglDevicePattern = ui.openglDeviceLabel->text();
     ui.openglDeviceLabel->setText(openglDevicePattern.arg(OpenGLSupport::deviceName()));
+  }
+
+  if (!gpu::isAvailable()) {
+    ui.enableGpuCb->setChecked(false);
+    ui.enableGpuCb->setEnabled(false);
+    ui.gpuDeviceLabel->setEnabled(false);
+    ui.gpuDeviceLabel->setText(tr("Not available"));
+  } else {
+    ui.enableGpuCb->setChecked(settings.isGpuProcessingEnabled());
+    ui.gpuDeviceLabel->setText(ui.gpuDeviceLabel->text().arg(gpu::deviceName()));
   }
 
   ui.colorSchemeBox->addItem(tr("Dark"), "dark");
@@ -91,6 +102,10 @@ void SettingsDialog::commitChanges() {
   ApplicationSettings& settings = ApplicationSettings::getInstance();
 
   settings.setOpenGlEnabled(ui.enableOpenglCb->isChecked());
+  if (ui.enableGpuCb->isEnabled()) {
+    settings.setGpuProcessingEnabled(ui.enableGpuCb->isChecked());
+    gpu::setEnabled(ui.enableGpuCb->isChecked());
+  }
   settings.setAutoSaveProjectEnabled(ui.autoSaveProjectCB->isChecked());
   settings.setHighlightDeviationEnabled(ui.highlightDeviationCB->isChecked());
   settings.setColorScheme(ui.colorSchemeBox->currentData().toString());

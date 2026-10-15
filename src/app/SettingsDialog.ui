@@ -48,6 +48,20 @@
            </widget>
           </item>
           <item>
+           <widget class="QCheckBox" name="enableGpuCb">
+            <property name="text">
+             <string>Use GPU for image processing</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="gpuDeviceLabel">
+            <property name="text">
+             <string>Device: %1</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QCheckBox" name="autoSaveProjectCB">
             <property name="text">
              <string>Auto-save the existing project</string>

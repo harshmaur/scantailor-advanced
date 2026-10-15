@@ -19,6 +19,7 @@ O ejecutar cada suite por separado:
 ./math_tests --log_level=message
 ./imageproc_tests --log_level=message
 ./qt_tests
+./gpu_tests --log_level=message
 ```
 
 ## Cobertura por módulo
@@ -50,6 +51,12 @@ O ejecutar cada suite por separado:
 ### imageproc_tests
 - **BinaryImage**, **Binarize**, **Morphology**, **RasterOp**, **Scale**, **Shear**, **Transform**, etc.
 - **Dpi**: resolución (DPI) y serialización XML.
+
+### gpu_tests
+- Compara la versión GPU de `transform()` / `transformToGray()` con la CPU (formatos, modos `OutsidePixels`, rotaciones, escalas, tamaños impares, bandas).
+- Sin GPU con soporte de compute los tests se omiten. En Linux sin GPU se puede usar lavapipe:
+  `SCANTAILOR_GPU_SOFTWARE=1 QT_QPA_PLATFORM=xcb xvfb-run -a ./gpu_tests`.
+- `./gpu_bench` mide CPU frente a GPU en una página sintética de 600 DPI.
 
 ### qt_tests (Qt Test)
 - **Tests de lógica (TestCoreQt)**: Units, foundation::Utils, SmartFilenameOrdering, QSignalSpy (señales y argumentos).

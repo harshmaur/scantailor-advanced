@@ -24,6 +24,10 @@ class ApplicationSettings {
 
   void setOpenGlEnabled(bool enabled);
 
+  bool isGpuProcessingEnabled() const;
+
+  void setGpuProcessingEnabled(bool enabled);
+
   QString getColorScheme() const;
 
   void setColorScheme(const QString& scheme);
@@ -118,6 +122,7 @@ class ApplicationSettings {
   static inline QString getKey(const QString& keyName);
 
   static const bool DEFAULT_OPENGL_STATE;
+  static const bool DEFAULT_GPU_PROCESSING_STATE;
   static const QString DEFAULT_COLOR_SCHEME;
   static const bool DEFAULT_AUTO_SAVE_PROJECT;
   static const int DEFAULT_TIFF_BW_COMPRESSION;
@@ -141,6 +146,7 @@ class ApplicationSettings {
 
   static const QString ROOT_KEY;
   static const QString OPENGL_STATE_KEY;
+  static const QString GPU_PROCESSING_STATE_KEY;
   static const QString AUTO_SAVE_PROJECT_KEY;
   static const QString COLOR_SCHEME_KEY;
   static const QString TIFF_BW_COMPRESSION_KEY;

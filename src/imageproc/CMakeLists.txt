@@ -55,7 +55,7 @@ set(sources
     DebugImages.h)
 
 add_library(imageproc STATIC ${sources})
-target_link_libraries(imageproc PUBLIC foundation math)
+target_link_libraries(imageproc PUBLIC foundation math gpu)
 target_include_directories(imageproc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
 if (BUILD_TESTS)

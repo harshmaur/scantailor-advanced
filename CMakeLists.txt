@@ -73,7 +73,7 @@ endif()
 st_set_default_build_type(Release)
 
 # Must be set before Boost (Flatpak and other chroot builds use -DBUILD_TESTS=OFF; issue #61).
-option(BUILD_TESTS "Build unit tests (math_tests, imageproc_tests, core_tests, foundation_tests, qt_tests)" ON)
+option(BUILD_TESTS "Build unit tests (math_tests, imageproc_tests, core_tests, foundation_tests, qt_tests, gpu_tests)" ON)
 
 if (NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -252,6 +252,17 @@ else()
   set(Qt_Xml_lib Qt5::Xml)
   set(Qt_Test_lib Qt5::Test)
 endif()
+
+option(ENABLE_GPU "Use the GPU for image processing when available (requires Qt >= 6.6 with ShaderTools)" ON)
+set(GPU_SUPPORT OFF)
+if (ENABLE_GPU AND Qt6_FOUND AND Qt6_VERSION VERSION_GREATER_EQUAL 6.6)
+  set(QT_NO_PRIVATE_MODULE_WARNING ON)
+  find_package(Qt6 QUIET OPTIONAL_COMPONENTS ShaderTools GuiPrivate CONFIG)
+  if (TARGET Qt6::GuiPrivate AND COMMAND qt_add_shaders)
+    set(GPU_SUPPORT ON)
+  endif()
+endif()
+message(STATUS "GPU image processing: ${GPU_SUPPORT}")
 
 
 #=================================== Threads ===================================#
