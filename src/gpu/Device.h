@@ -122,7 +122,9 @@ class Device {
   QString m_name;
 
   // Accessed only on the device thread.
+#if QT_CONFIG(vulkan)
   std::unique_ptr<QVulkanInstance> m_vulkanInstance;
+#endif
   std::unique_ptr<QRhi> m_rhi;
   std::unique_ptr<QRhiBuffer> m_dummyUniform;
   std::unique_ptr<QRhiBuffer> m_dummyStorage;
