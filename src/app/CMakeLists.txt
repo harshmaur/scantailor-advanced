@@ -79,7 +79,17 @@ target_include_directories(
     ${target_name}
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
     "$<TARGET_PROPERTY:TIFF::TIFF,INTERFACE_INCLUDE_DIRECTORIES>")
-install(TARGETS ${target_name} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(TARGETS ${target_name} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" BUNDLE DESTINATION .)
+
+if (APPLE)
+  set_target_properties(
+      ${target_name} PROPERTIES
+      MACOSX_BUNDLE TRUE
+      MACOSX_BUNDLE_BUNDLE_NAME "ScanTailor Advanced"
+      MACOSX_BUNDLE_GUI_IDENTIFIER "com.github.scantailor-advanced"
+      MACOSX_BUNDLE_BUNDLE_VERSION "${VERSION}"
+      MACOSX_BUNDLE_SHORT_VERSION_STRING "${VERSION}")
+endif()
 
 if (Qt6_FOUND AND WIN32)
   #manage plugins with windeployqt.
