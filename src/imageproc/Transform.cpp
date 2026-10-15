@@ -3,15 +3,23 @@
 
 #include "Transform.h"
 
+#include <gpu/TransformKernel.h>
+
 #include <QDebug>
 #include <cassert>
+#include <optional>
 #include <stdexcept>
+#include <vector>
 
 #include "BadAllocIfNull.h"
 #include "ColorMixer.h"
 #include "Grayscale.h"
 
 namespace imageproc {
+static_assert(OutsidePixels::COLOR == gpu::OUTSIDE_COLOR && OutsidePixels::NEAREST == gpu::OUTSIDE_NEAREST
+                  && OutsidePixels::WEAK == gpu::OUTSIDE_WEAK,
+              "OutsidePixels flags must match the GPU kernel");
+
 namespace {
 struct XLess {
   bool operator()(const QPointF& lhs, const QPointF& rhs) const { return lhs.x() < rhs.x(); }
@@ -41,36 +49,28 @@ QSizeF calcSrcUnitSize(const QTransform& xform, const QSizeF& min) {
 }
 
 template <typename StorageUnit, typename Mixer>
-static void transformGeneric(const StorageUnit* const srcData,
-                             const int srcStride,
-                             const QSize srcSize,
-                             StorageUnit* const dstData,
-                             const int dstStride,
-                             const QTransform& xform,
-                             const QRect& dstRect,
-                             const StorageUnit outsideColor,
-                             const int outsideFlags,
-                             const QSizeF& minMappingArea) {
+static void transformGenericLines(const StorageUnit* const srcData,
+                                  const int srcStride,
+                                  const QSize srcSize,
+                                  StorageUnit* const dstData,
+                                  const int dstStride,
+                                  const QTransform& invXform,
+                                  const int dw,
+                                  const int src32UnitW,
+                                  const int src32UnitH,
+                                  const StorageUnit outsideColor,
+                                  const int outsideFlags,
+                                  const int dyBegin,
+                                  const int dyEnd) {
   const int sw = srcSize.width();
   const int sh = srcSize.height();
-  const int dw = dstRect.width();
-  const int dh = dstRect.height();
 
-  StorageUnit* dstLine = dstData;
-
-  QTransform invXform;
-  invXform.translate(dstRect.x(), dstRect.y());
-  invXform *= xform.inverted();
-  invXform *= QTransform().scale(32.0, 32.0);
+  StorageUnit* dstLine = dstData + dyBegin * dstStride;
 
   // sx32 = dx*invXform.m11() + dy*invXform.m21() + invXform.dx();
   // sy32 = dy*invXform.m22() + dx*invXform.m12() + invXform.dy();
 
-  const QSizeF src32UnitSize(calcSrcUnitSize(invXform, minMappingArea));
-  const int src32UnitW = std::max<int>(1, qRound(src32UnitSize.width()));
-  const int src32UnitH = std::max<int>(1, qRound(src32UnitSize.height()));
-
-  for (int dy = 0; dy < dh; ++dy, dstLine += dstStride) {
+  for (int dy = dyBegin; dy < dyEnd; ++dy, dstLine += dstStride) {
     const double fDyCenter = dy + 0.5;
     const double fSx32Base = fDyCenter * invXform.m21() + invXform.dx();
     const double fSy32Base = fDyCenter * invXform.m22() + invXform.dy();
@@ -279,6 +279,64 @@ static void transformGeneric(const StorageUnit* const srcData,
       dstLine[dx] = mixer.mix(srcArea + backgroundArea);
     }
   }
+}  // transformGenericLines
+
+template <typename StorageUnit, typename Mixer>
+static void transformGeneric(const std::optional<gpu::TransformFormat> gpuFormat,
+                             const StorageUnit* const srcData,
+                             const int srcStride,
+                             const QSize srcSize,
+                             StorageUnit* const dstData,
+                             const int dstStride,
+                             const QTransform& xform,
+                             const QRect& dstRect,
+                             const StorageUnit outsideColor,
+                             const int outsideFlags,
+                             const QSizeF& minMappingArea) {
+  const int dw = dstRect.width();
+  const int dh = dstRect.height();
+
+  QTransform invXform;
+  invXform.translate(dstRect.x(), dstRect.y());
+  invXform *= xform.inverted();
+  invXform *= QTransform().scale(32.0, 32.0);
+
+  const QSizeF src32UnitSize(calcSrcUnitSize(invXform, minMappingArea));
+  const int src32UnitW = std::max<int>(1, qRound(src32UnitSize.width()));
+  const int src32UnitH = std::max<int>(1, qRound(src32UnitSize.height()));
+
+  if (gpuFormat) {
+    const auto bytesPerUnit = static_cast<int>(sizeof(StorageUnit));
+    const gpu::TransformParams gpuParams{*gpuFormat,
+                                         reinterpret_cast<const uint8_t*>(srcData),
+                                         srcSize.width(),
+                                         srcSize.height(),
+                                         srcStride * bytesPerUnit,
+                                         reinterpret_cast<uint8_t*>(dstData),
+                                         dw,
+                                         dh,
+                                         dstStride * bytesPerUnit,
+                                         invXform.m11(),
+                                         invXform.m12(),
+                                         invXform.m21(),
+                                         invXform.m22(),
+                                         invXform.dx(),
+                                         invXform.dy(),
+                                         src32UnitW,
+                                         src32UnitH,
+                                         outsideColor,
+                                         outsideFlags};
+    std::vector<int> rowsToRecompute;
+    if (gpu::transform(gpuParams, rowsToRecompute)) {
+      for (const int dy : rowsToRecompute) {
+        transformGenericLines<StorageUnit, Mixer>(srcData, srcStride, srcSize, dstData, dstStride, invXform, dw,
+                                                  src32UnitW, src32UnitH, outsideColor, outsideFlags, dy, dy + 1);
+      }
+      return;
+    }
+  }
+  transformGenericLines<StorageUnit, Mixer>(srcData, srcStride, srcSize, dstData, dstStride, invXform, dw, src32UnitW,
+                                            src32UnitH, outsideColor, outsideFlags, 0, dh);
 }  // transformGeneric
 
 template <typename ImageT>
@@ -320,8 +378,8 @@ QImage transform(const QImage& src,
         GrayImage grayDst(dstRect.size());
         using AccumType = uint32_t;
         transformGeneric<uint8_t, GrayColorMixer<AccumType>>(
-            graySrc.data(), graySrc.stride(), src.size(), grayDst.data(), grayDst.stride(), xform, dstRect,
-            outsidePixels.grayLevel(), outsidePixels.flags(), minMappingArea);
+            gpu::TransformFormat::Gray8, graySrc.data(), graySrc.stride(), src.size(), grayDst.data(), grayDst.stride(),
+            xform, dstRect, outsidePixels.grayLevel(), outsidePixels.flags(), minMappingArea);
 
         fixDpiInPlace(grayDst, src, xform);
         return grayDst;
@@ -336,8 +394,9 @@ QImage transform(const QImage& src,
 
         using AccumType = uint32_t;
         transformGeneric<uint32_t, RgbColorMixer<AccumType>>(
-            (const uint32_t*) srcRgb32.bits(), srcRgb32.bytesPerLine() / 4, srcRgb32.size(), (uint32_t*) dst.bits(),
-            dst.bytesPerLine() / 4, xform, dstRect, outsidePixels.rgb(), outsidePixels.flags(), minMappingArea);
+            gpu::TransformFormat::Rgb32, (const uint32_t*) srcRgb32.bits(), srcRgb32.bytesPerLine() / 4,
+            srcRgb32.size(), (uint32_t*) dst.bits(), dst.bytesPerLine() / 4, xform, dstRect, outsidePixels.rgb(),
+            outsidePixels.flags(), minMappingArea);
 
         fixDpiInPlace(dst, src, xform);
         return dst;
@@ -349,8 +408,9 @@ QImage transform(const QImage& src,
 
         using AccumType = float;
         transformGeneric<uint32_t, ArgbColorMixer<AccumType>>(
-            (const uint32_t*) srcArgb32.bits(), srcArgb32.bytesPerLine() / 4, srcArgb32.size(), (uint32_t*) dst.bits(),
-            dst.bytesPerLine() / 4, xform, dstRect, outsidePixels.rgba(), outsidePixels.flags(), minMappingArea);
+            std::nullopt, (const uint32_t*) srcArgb32.bits(), srcArgb32.bytesPerLine() / 4, srcArgb32.size(),
+            (uint32_t*) dst.bits(), dst.bytesPerLine() / 4, xform, dstRect, outsidePixels.rgba(), outsidePixels.flags(),
+            minMappingArea);
 
         fixDpiInPlace(dst, src, xform);
         return dst;
@@ -377,9 +437,9 @@ GrayImage transformToGray(const QImage& src,
   GrayImage dst(dstRect.size());
 
   using AccumType = unsigned;
-  transformGeneric<uint8_t, GrayColorMixer<AccumType>>(graySrc.data(), graySrc.stride(), graySrc.size(), dst.data(),
-                                                       dst.stride(), xform, dstRect, outsidePixels.grayLevel(),
-                                                       outsidePixels.flags(), minMappingArea);
+  transformGeneric<uint8_t, GrayColorMixer<AccumType>>(
+      gpu::TransformFormat::Gray8, graySrc.data(), graySrc.stride(), graySrc.size(), dst.data(), dst.stride(), xform,
+      dstRect, outsidePixels.grayLevel(), outsidePixels.flags(), minMappingArea);
 
   fixDpiInPlace(dst, src, xform);
   return dst;
