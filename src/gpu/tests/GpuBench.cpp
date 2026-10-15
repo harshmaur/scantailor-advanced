@@ -4,6 +4,7 @@
 #include <CylindricalSurfaceDewarper.h>
 #include <GrayImage.h>
 #include <RasterDewarper.h>
+#include <SavGolFilter.h>
 #include <Transform.h>
 
 #include <QElapsedTimer>
@@ -98,6 +99,30 @@ void benchDewarp(const char* name, const QImage& src, const int runs) {
       static_cast<long long>(recomputed), static_cast<long long>(diff.mismatches), diff.maxChannelDiff);
 }
 
+Timing timeSavGol(const QImage& src, const bool useGpu, const int runs) {
+  gpu::setEnabled(useGpu);
+  std::vector<double> times;
+  QImage result;
+  for (int i = 0; i < runs; ++i) {
+    QElapsedTimer timer;
+    timer.start();
+    result = imageproc::savGolFilter(src, QSize(11, 11), 4, 4);
+    times.push_back(timer.nsecsElapsed() / 1e6);
+  }
+  std::sort(times.begin(), times.end());
+  return {times[times.size() / 2], result};
+}
+
+void benchSavGol(const QImage& src, const int runs) {
+  const Timing cpu = timeSavGol(src, false, runs);
+  const qint64 dispatchesBefore = gpu::testing::dispatchCount();
+  const Timing gpu = timeSavGol(src, true, runs);
+  const qint64 dispatches = (gpu::testing::dispatchCount() - dispatchesBefore) / runs;
+  const gpu::tests::ImageDiff diff = gpu::tests::compareImages(cpu.result, gpu.result);
+  std::printf("savgol %5dx%-5d cpu %9.1f ms  gpu %9.1f ms  dispatches %lld  mismatches %lld\n", src.width(),
+              src.height(), cpu.medianMs, gpu.medianMs, static_cast<long long>(dispatches),
+              static_cast<long long>(diff.mismatches));
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -143,5 +168,10 @@ int main(int argc, char** argv) {
     benchDewarp("gray", gpu::tests::textLikeImage(QImage::Format_Indexed8, side, side, side), runs);
   }
 
+  std::printf("savGolFilter 11x11, degree 4 (600 DPI output smoothing), median of %d runs:\n", runs);
+  benchSavGol(gpu::tests::textLikeImage(QImage::Format_Indexed8, 5100, 6600, 9), runs);
+  for (const int side : {256, 512, 1024, 2048}) {
+    benchSavGol(gpu::tests::textLikeImage(QImage::Format_Indexed8, side, side, side), runs);
+  }
   return 0;
 }
