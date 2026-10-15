@@ -5,10 +5,13 @@
 
 #include <ColorMixer.h>
 #include <GrayImage.h>
+#include <gpu/DewarpKernel.h>
 
 #include <QDebug>
 #include <cmath>
 #include <stdexcept>
+#include <type_traits>
+#include <vector>
 
 #include "CylindricalSurfaceDewarper.h"
 
@@ -396,6 +399,21 @@ void areaMapGeneratrix(const PixelType* const srcData,
   }
 }  // areaMapGeneratrix
 
+struct GridColumn {
+  HomographicTransform<1, float> homog;
+  Vec2f origin;
+  Vec2f vec;
+};
+
+template <typename ColorMixer>
+gpu::TransformFormat gpuFormat() {
+  if (std::is_same<typename ColorMixer::resultType, uint8_t>::value) {
+    return gpu::TransformFormat::Gray8;
+  }
+  return std::is_same<ColorMixer, ArgbColorMixer<typename ColorMixer::accumType>>::value ? gpu::TransformFormat::Argb32
+                                                                                         : gpu::TransformFormat::Rgb32;
+}
+
 template <typename ColorMixer, typename PixelType>
 void dewarpGeneric(const PixelType* const srcData,
                    const QSize srcSize,
@@ -419,20 +437,60 @@ void dewarpGeneric(const PixelType* const srcData,
   const auto modelDomainTop = static_cast<float>(modelDomain.top());
   const auto modelYScale = static_cast<float>(1.0 / (modelDomain.bottom() - modelDomain.top()));
 
-  std::vector<Vec2f> prevGridColumn(dstHeight + 1);
-  std::vector<Vec2f> nextGridColumn(dstHeight + 1);
-
+  std::vector<GridColumn> gridColumns;
+  gridColumns.reserve(dstWidth + 1);
   for (int dstX = 0; dstX <= dstWidth; ++dstX) {
     const double modelX = (dstX - modelDomainLeft) * modelXScale;
     const CylindricalSurfaceDewarper::Generatrix generatrix(distortionModel.mapGeneratrix(modelX, state));
+    gridColumns.push_back({HomographicTransform<1, float>(generatrix.pln2img.mat()), Vec2f(generatrix.imgLine.p1()),
+                           Vec2f(generatrix.imgLine.p2() - generatrix.imgLine.p1())});
+  }
 
-    const HomographicTransform<1, float> homog(generatrix.pln2img.mat());
-    const Vec2f origin(generatrix.imgLine.p1());
-    const Vec2f vec(generatrix.imgLine.p2() - generatrix.imgLine.p1());
+  const auto gridPoint = [&](const int dstX, const int dstY) {
+    const GridColumn& column = gridColumns[dstX];
+    const float modelY = (float(dstY) - modelDomainTop) * modelYScale;
+    return Vec2f(column.origin + column.vec * column.homog(modelY));
+  };
+  const auto fillGridColumn = [&](const int dstX, std::vector<Vec2f>& gridColumn) {
     for (int dstY = 0; dstY <= dstHeight; ++dstY) {
-      const float modelY = (float(dstY) - modelDomainTop) * modelYScale;
-      nextGridColumn[dstY] = origin + vec * homog(modelY);
+      gridColumn[dstY] = gridPoint(dstX, dstY);
     }
+  };
+
+  std::vector<Vec2f> prevGridColumn(dstHeight + 1);
+  std::vector<Vec2f> nextGridColumn(dstHeight + 1);
+
+  const auto bytesPerPixel = static_cast<int>(sizeof(PixelType));
+  const gpu::DewarpParams gpuParams{gpuFormat<ColorMixer>(),
+                                    reinterpret_cast<const uint8_t*>(srcData),
+                                    srcWidth,
+                                    srcHeight,
+                                    srcStride * bytesPerPixel,
+                                    reinterpret_cast<uint8_t*>(dstData),
+                                    dstWidth,
+                                    dstHeight,
+                                    dstStride * bytesPerPixel,
+                                    bgColor,
+                                    [&](const int dstY, float* out) {
+                                      for (int dstX = 0; dstX <= dstWidth; ++dstX) {
+                                        const Vec2f pt(gridPoint(dstX, dstY));
+                                        out[dstX * 2] = pt[0];
+                                        out[dstX * 2 + 1] = pt[1];
+                                      }
+                                    }};
+  std::vector<int> columnsToRecompute;
+  if (gpu::dewarp(gpuParams, columnsToRecompute)) {
+    for (const int dstX : columnsToRecompute) {
+      fillGridColumn(dstX, prevGridColumn);
+      fillGridColumn(dstX + 1, nextGridColumn);
+      areaMapGeneratrix<ColorMixer, PixelType>(srcData, srcSize, srcStride, dstData + dstX, dstSize, dstStride, bgColor,
+                                               prevGridColumn, nextGridColumn);
+    }
+    return;
+  }
+
+  for (int dstX = 0; dstX <= dstWidth; ++dstX) {
+    fillGridColumn(dstX, nextGridColumn);
 
     if (dstX != 0) {
       areaMapGeneratrix<ColorMixer, PixelType>(srcData, srcSize, srcStride, dstData + dstX - 1, dstSize, dstStride,
