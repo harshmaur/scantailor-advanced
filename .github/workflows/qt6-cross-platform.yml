@@ -1,0 +1,123 @@
+name: Qt6 cross-platform
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  QT_VERSION: "6.8.*"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-14-arm64
+            os: macos-14
+            qt_arch: ""
+          - name: windows-msvc2022
+            os: windows-latest
+            qt_arch: win64_msvc2022_64
+          - name: ubuntu-24.04
+            os: ubuntu-24.04
+            qt_arch: ""
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja boost jpeg-turbo libpng libtiff
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --fix-missing \
+            ninja-build libjpeg-dev libpng-dev libtiff-dev zlib1g-dev \
+            libboost-test-dev libboost-dev \
+            libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libegl1 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
+            libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Cache vcpkg binaries (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}\vcpkg-cache
+          key: vcpkg-${{ runner.os }}-x64-windows-static-md-v2
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\vcpkg-cache" | Out-Null
+          $env:VCPKG_DEFAULT_BINARY_CACHE = "$env:GITHUB_WORKSPACE\vcpkg-cache"
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install `
+            boost-test boost-foreach boost-lambda boost-multi-index boost-function boost-bind boost-smart-ptr boost-intrusive boost-iterator boost-type-traits boost-mpl boost-array libjpeg-turbo libpng tiff zlib `
+            --triplet x64-windows-static-md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -G Ninja -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: cmake -S . -B build -G Ninja -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DPORTABLE_VERSION=OFF
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item build\scantailor-advanced.exe dist\
+          windeployqt --release dist\scantailor-advanced.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir dist
+          cp build/scantailor-advanced dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: scantailor-qt6-${{ matrix.name }}
+          path: dist
