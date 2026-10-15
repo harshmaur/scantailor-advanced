@@ -253,6 +253,22 @@ else()
   set(Qt_Test_lib Qt5::Test)
 endif()
 
+option(ENABLE_GPU
+       "Use the GPU for image processing when available (requires Qt >= 6.6 with ShaderTools and GuiPrivate; tested with Qt 6.8 to 6.10)"
+       ON)
+set(GPU_SUPPORT OFF)
+if (ENABLE_GPU AND Qt6_FOUND AND Qt6_VERSION VERSION_GREATER_EQUAL 6.6)
+  set(QT_NO_PRIVATE_MODULE_WARNING ON)
+  find_package(Qt6 QUIET OPTIONAL_COMPONENTS ShaderTools GuiPrivate CONFIG)
+  if (TARGET Qt6::GuiPrivate AND COMMAND qt_add_shaders)
+    set(GPU_SUPPORT ON)
+  endif()
+endif()
+if (ENABLE_GPU AND NOT GPU_SUPPORT)
+  message(WARNING "ENABLE_GPU is ON, but GPU support needs Qt >= 6.6 with ShaderTools and GuiPrivate: building without it")
+endif()
+message(STATUS "GPU image processing: ${GPU_SUPPORT}")
+
 
 #=================================== Threads ===================================#
 
