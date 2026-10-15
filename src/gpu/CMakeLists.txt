@@ -32,3 +32,7 @@ if (GPU_SUPPORT)
         OUTPUTS "transform_${format}.comp.qsb")
   endforeach()
 endif()
+
+if (BUILD_TESTS)
+  add_subdirectory(tests)
+endif()

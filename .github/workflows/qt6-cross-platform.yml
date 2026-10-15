@@ -37,6 +37,7 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           arch: ${{ matrix.qt_arch }}
+          modules: qtshadertools
           cache: true
 
       - name: Install dependencies (macOS)
@@ -51,7 +52,7 @@ jobs:
             ninja-build libjpeg-dev libpng-dev libtiff-dev zlib1g-dev \
             libboost-test-dev libboost-dev \
             libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libegl1 \
-            libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
+            libvulkan-dev mesa-vulkan-drivers xvfb libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
             libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0
 
       - name: Set up MSVC (Windows)
@@ -100,6 +101,41 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      - name: GPU tests (Linux, Vulkan on lavapipe)
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: xcb
+          SCANTAILOR_GPU_SOFTWARE: "1"
+          SCANTAILOR_GPU_REQUIRED: "1"
+        run: xvfb-run -a build/gpu_tests --log_level=message --report_level=short
+
+      - name: GPU tests (macOS, Metal)
+        if: runner.os == 'macOS'
+        env:
+          SCANTAILOR_GPU_REQUIRED: "1"
+        run: |
+          system_profiler SPDisplaysDataType | grep -E "Chipset|Metal" || true
+          build/gpu_tests --log_level=message --report_level=short
+          build/gpu_bench 3
+
+      - name: GPU tests (Windows, Direct3D 12 on WARP)
+        if: runner.os == 'Windows'
+        env:
+          SCANTAILOR_GPU_SOFTWARE: "1"
+          SCANTAILOR_GPU_REQUIRED: "1"
+          SCANTAILOR_GPU_BACKEND: d3d12
+        shell: bash
+        run: build/gpu_tests --log_level=message --report_level=short
+
+      - name: GPU tests (Windows, Direct3D 11 on WARP)
+        if: runner.os == 'Windows'
+        env:
+          SCANTAILOR_GPU_SOFTWARE: "1"
+          SCANTAILOR_GPU_REQUIRED: "1"
+          SCANTAILOR_GPU_BACKEND: d3d11
+        shell: bash
+        run: build/gpu_tests --log_level=message --report_level=short
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
