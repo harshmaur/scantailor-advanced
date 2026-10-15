@@ -164,6 +164,18 @@ jobs:
           mkdir dist
           cp -R build/scantailor-advanced.app "$app"
           macdeployqt "$app" -always-overwrite
+          fw="$app/Contents/Frameworks"
+          while true; do
+            missing=$(otool -L "$fw"/*.dylib | awk '$1 ~ /^@rpath\/.*\.dylib$/ { sub("@rpath/", "", $1); print $1 }' | sort -u \
+              | while read -r lib; do [ -e "$fw/$lib" ] || echo "$lib"; done)
+            [ -z "$missing" ] && break
+            for lib in $missing; do
+              cp "$(brew --prefix)/lib/$lib" "$fw/$lib"
+              chmod u+w "$fw/$lib"
+              install_name_tool -id "@rpath/$lib" "$fw/$lib"
+              echo "added $lib"
+            done
+          done
           codesign --force --deep -s - "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           find "$app" -type f \( -perm +111 -o -name '*.dylib' \) -exec otool -L {} + > otool.txt || true
