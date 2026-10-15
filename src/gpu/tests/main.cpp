@@ -20,7 +20,9 @@ struct GuiApplicationFixture {
     }
 #endif
     app = std::make_unique<QGuiApplication>(argc, argv);
-    if (!gpu::isAvailable()) {
+    if (gpu::isAvailable()) {
+      std::printf("GPU device: %s\n", qPrintable(gpu::deviceName()));
+    } else {
       std::fprintf(stderr, "No GPU device with compute support: the GPU comparison tests are skipped.\n");
     }
   }

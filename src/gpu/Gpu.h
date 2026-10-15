@@ -14,6 +14,7 @@ namespace gpu {
  * The SCANTAILOR_GPU environment variable overrides this:
  * "0" forces GPU processing off, "1" forces it on.
  * Software renderers are only used if SCANTAILOR_GPU_SOFTWARE is "1".
+ * SCANTAILOR_GPU_BACKEND ("metal", "d3d12", "d3d11" or "vulkan") restricts the graphics API.
  */
 void setEnabled(bool enabled);
 

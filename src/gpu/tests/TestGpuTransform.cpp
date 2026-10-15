@@ -136,6 +136,12 @@ const std::vector<QImage::Format> allFormats = {QImage::Format_Indexed8, QImage:
 
 BOOST_AUTO_TEST_SUITE(GpuEnvironmentTestSuite)
 
+BOOST_AUTO_TEST_CASE(test_required_device_is_available) {
+  if (qgetenv("SCANTAILOR_GPU_REQUIRED") == "1") {
+    BOOST_REQUIRE_MESSAGE(isAvailable(), "SCANTAILOR_GPU_REQUIRED=1 but no GPU device with compute support");
+  }
+}
+
 BOOST_FIXTURE_TEST_CASE(test_env_off_uses_cpu, GpuSettingsFixture) {
   const EnvVar env("SCANTAILOR_GPU", "0");
   BOOST_CHECK(!isEnabled());

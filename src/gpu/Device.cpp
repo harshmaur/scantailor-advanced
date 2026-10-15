@@ -146,6 +146,8 @@ void Device::threadLoop() {
 
 bool Device::initialize() {
   const bool allowSoftware = qgetenv("SCANTAILOR_GPU_SOFTWARE") == "1";
+  const QByteArray backend = qgetenv("SCANTAILOR_GPU_BACKEND").toLower();
+  auto wanted = [&backend](const char* name) { return backend.isEmpty() || (backend == name); };
   QRhi::Flags flags;
   if (allowSoftware) {
     flags |= QRhi::PreferSoftwareRenderer;
@@ -173,26 +175,39 @@ bool Device::initialize() {
 
 #if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
   QRhiMetalInitParams metalParams;
-  tryCreate(QRhi::Metal, &metalParams, "Metal");
+  if (wanted("metal")) {
+    tryCreate(QRhi::Metal, &metalParams, "Metal");
+  }
 #elif defined(Q_OS_WIN)
   QRhiD3D12InitParams d3d12Params;
   QRhiD3D11InitParams d3d11Params;
-  tryCreate(QRhi::D3D12, &d3d12Params, "Direct3D 12") || tryCreate(QRhi::D3D11, &d3d11Params, "Direct3D 11");
+  if (wanted("d3d12")) {
+    tryCreate(QRhi::D3D12, &d3d12Params, "Direct3D 12");
+  }
+  if (!m_rhi && wanted("d3d11")) {
+    tryCreate(QRhi::D3D11, &d3d11Params, "Direct3D 11");
+  }
 #elif QT_CONFIG(vulkan)
-  m_vulkanInstance = std::make_unique<QVulkanInstance>();
-  m_vulkanInstance->setExtensions(QRhiVulkanInitParams::preferredInstanceExtensions());
-  if (m_vulkanInstance->create()) {
-    QRhiVulkanInitParams vulkanParams;
-    vulkanParams.inst = m_vulkanInstance.get();
-    tryCreate(QRhi::Vulkan, &vulkanParams, "Vulkan");
-  } else {
-    errors.push_back(
-        QStringLiteral("Vulkan: failed to create an instance (error %1)").arg(m_vulkanInstance->errorCode()));
+  if (wanted("vulkan")) {
+    m_vulkanInstance = std::make_unique<QVulkanInstance>();
+    m_vulkanInstance->setExtensions(QRhiVulkanInitParams::preferredInstanceExtensions());
+    if (m_vulkanInstance->create()) {
+      QRhiVulkanInitParams vulkanParams;
+      vulkanParams.inst = m_vulkanInstance.get();
+      tryCreate(QRhi::Vulkan, &vulkanParams, "Vulkan");
+    } else {
+      errors.push_back(
+          QStringLiteral("Vulkan: failed to create an instance (error %1)").arg(m_vulkanInstance->errorCode()));
+    }
   }
 #else
   errors.push_back(QStringLiteral("Qt was built without a supported graphics API"));
 #endif
 
+  if (!m_rhi && errors.isEmpty()) {
+    errors.push_back(QStringLiteral("SCANTAILOR_GPU_BACKEND=%1 is not available on this platform")
+                         .arg(QString::fromLatin1(backend)));
+  }
   if (m_rhi) {
     m_dummyUniform.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, 256));
     m_dummyStorage.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::StorageBuffer, 256));
