@@ -1,11 +1,13 @@
 set(sources
     Gpu.cpp Gpu.h
-    Internal.h)
+    Internal.h
+    TransformKernel.h)
 
 if (GPU_SUPPORT)
   list(APPEND sources
       Device.cpp Device.h
-      Banding.cpp Banding.h)
+      Banding.cpp Banding.h
+      TransformKernel.cpp)
 else()
   list(APPEND sources Stub.cpp)
 endif()
@@ -16,4 +18,17 @@ target_include_directories(gpu PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
 if (GPU_SUPPORT)
   target_link_libraries(gpu PRIVATE Qt6::Gui Qt6::GuiPrivate)
+  foreach (format gray rgb argb)
+    string(TOUPPER "${format}" format_define)
+    qt_add_shaders(
+        gpu "gpu_transform_${format}"
+        PREFIX "/gpu"
+        GLSL "430"
+        HLSL 50
+        MSL 12
+        QUIET
+        DEFINES "FORMAT_${format_define}=1"
+        FILES shaders/transform.comp
+        OUTPUTS "transform_${format}.comp.qsb")
+  endforeach()
 endif()

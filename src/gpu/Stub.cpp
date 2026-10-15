@@ -2,6 +2,7 @@
 // Use of this source code is governed by the GNU GPLv3 license that can be found in the LICENSE file.
 
 #include "Gpu.h"
+#include "TransformKernel.h"
 
 namespace gpu {
 bool isAvailable() {
@@ -10,5 +11,9 @@ bool isAvailable() {
 
 QString deviceName() {
   return QString();
+}
+
+bool transform(const TransformParams&, std::vector<int>&) {
+  return false;
 }
 }  // namespace gpu
