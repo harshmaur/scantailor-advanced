@@ -9,6 +9,7 @@
 #include <QtCore/QSettings>
 
 const bool ApplicationSettings::DEFAULT_OPENGL_STATE = false;
+const bool ApplicationSettings::DEFAULT_GPU_PROCESSING_STATE = true;
 const QString ApplicationSettings::DEFAULT_COLOR_SCHEME = "dark";
 const bool ApplicationSettings::DEFAULT_AUTO_SAVE_PROJECT = false;
 const int ApplicationSettings::DEFAULT_TIFF_BW_COMPRESSION = COMPRESSION_CCITTFAX4;
@@ -32,6 +33,7 @@ const bool ApplicationSettings::DEFAULT_SHOW_CANCELING_SELECTION_QUESTION = true
 
 const QString ApplicationSettings::ROOT_KEY = "settings";
 const QString ApplicationSettings::OPENGL_STATE_KEY = "enable_opengl";
+const QString ApplicationSettings::GPU_PROCESSING_STATE_KEY = "enable_gpu_processing";
 const QString ApplicationSettings::AUTO_SAVE_PROJECT_KEY = "auto_save_project";
 const QString ApplicationSettings::COLOR_SCHEME_KEY = "color_scheme";
 const QString ApplicationSettings::TIFF_BW_COMPRESSION_KEY = "bw_compression";
@@ -74,6 +76,14 @@ bool ApplicationSettings::isOpenGlEnabled() const {
 
 void ApplicationSettings::setOpenGlEnabled(bool enabled) {
   m_settings.setValue(getKey(OPENGL_STATE_KEY), enabled);
+}
+
+bool ApplicationSettings::isGpuProcessingEnabled() const {
+  return m_settings.value(getKey(GPU_PROCESSING_STATE_KEY), DEFAULT_GPU_PROCESSING_STATE).toBool();
+}
+
+void ApplicationSettings::setGpuProcessingEnabled(bool enabled) {
+  m_settings.setValue(getKey(GPU_PROCESSING_STATE_KEY), enabled);
 }
 
 QString ApplicationSettings::getColorScheme() const {
