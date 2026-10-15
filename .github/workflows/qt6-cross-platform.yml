@@ -116,6 +116,41 @@ jobs:
           mkdir dist
           cp build/scantailor-advanced dist/
 
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          app="dist/ScanTailor Advanced.app"
+          mkdir dist
+          cp -R build/scantailor-advanced.app "$app"
+          macdeployqt "$app" -always-overwrite
+          fw="$app/Contents/Frameworks"
+          while true; do
+            missing=$(otool -L "$fw"/*.dylib | awk '$1 ~ /^@rpath\/.*\.dylib$/ { sub("@rpath/", "", $1); print $1 }' | sort -u \
+              | while read -r lib; do [ -e "$fw/$lib" ] || echo "$lib"; done)
+            [ -z "$missing" ] && break
+            for lib in $missing; do
+              cp "$(brew --prefix)/lib/$lib" "$fw/$lib"
+              chmod u+w "$fw/$lib"
+              install_name_tool -id "@rpath/$lib" "$fw/$lib"
+              echo "added $lib"
+            done
+          done
+          codesign --force --deep -s - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          find "$app" -type f \( -perm +111 -o -name '*.dylib' \) -exec otool -L {} + > otool.txt || true
+          grep -c "@executable_path\|@rpath" otool.txt
+          if grep -E "/opt/homebrew|/usr/local|${QT_ROOT_DIR:?}" otool.txt; then
+            echo "The bundle still references Homebrew or Qt install paths"
+            exit 1
+          fi
+          env -u QT_QPA_PLATFORM "$app/Contents/MacOS/scantailor-advanced" &
+          pid=$!
+          sleep 10
+          kill -0 $pid
+          kill $pid
+          ditto -c -k --keepParent "$app" dist/ScanTailor-Advanced-macOS-arm64.zip
+          rm -rf "$app"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
