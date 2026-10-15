@@ -12,11 +12,13 @@ namespace {
 constexpr qint64 DEFAULT_MAX_BUFFER_BYTES = qint64(64) << 20;
 constexpr qint64 DEFAULT_MIN_TRANSFORM_PIXELS = 1 << 20;
 constexpr qint64 DEFAULT_MIN_DEWARP_PIXELS = 1 << 20;
+constexpr qint64 DEFAULT_MIN_SAVGOL_PIXELS = 1 << 20;
 
 std::atomic<bool> enabledSetting(true);
 std::atomic<qint64> maxBufferBytesOverride(0);
 std::atomic<qint64> minTransformPixelsOverride(-1);
 std::atomic<qint64> minDewarpPixelsOverride(-1);
+std::atomic<qint64> minSavGolPixelsOverride(-1);
 std::atomic<qint64> dispatches(0);
 std::atomic<qint64> recomputed(0);
 std::atomic<qint64> recomputedCols(0);
@@ -56,6 +58,11 @@ qint64 minDewarpPixels() {
   return pixels >= 0 ? pixels : DEFAULT_MIN_DEWARP_PIXELS;
 }
 
+qint64 minSavGolPixels() {
+  const qint64 pixels = minSavGolPixelsOverride;
+  return pixels >= 0 ? pixels : DEFAULT_MIN_SAVGOL_PIXELS;
+}
+
 void countDispatch() {
   ++dispatches;
 }
@@ -79,6 +86,10 @@ void setMinTransformPixels(const qint64 pixels) {
 
 void setMinDewarpPixels(const qint64 pixels) {
   minDewarpPixelsOverride = pixels;
+}
+
+void setMinSavGolPixels(const qint64 pixels) {
+  minSavGolPixelsOverride = pixels;
 }
 
 qint64 dispatchCount() {

@@ -54,6 +54,7 @@ O ejecutar cada suite por separado:
 
 ### gpu_tests
 - Compara la versión GPU de `transform()` / `transformToGray()` con la CPU (formatos, modos `OutsidePixels`, rotaciones, escalas, tamaños impares, bandas).
+- Compara la versión GPU de `savGolFilter()` con la CPU (ventanas y grados de `smoothToGrayscale()`, imágenes menores que la ventana, bandas).
 - Sin GPU con soporte de compute los tests se omiten. En Linux sin GPU se puede usar lavapipe:
   `SCANTAILOR_GPU_SOFTWARE=1 QT_QPA_PLATFORM=xcb xvfb-run -a ./gpu_tests`.
 - `./gpu_bench` mide CPU frente a GPU en una página sintética de 600 DPI.

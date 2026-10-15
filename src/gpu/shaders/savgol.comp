@@ -1,0 +1,86 @@
+#version 450
+
+// GPU port of the separable passes of savGolFilterGrayToGray() in src/imageproc/SavGolFilter.cpp.
+// Computes the rows of a band that the full kernel window covers; the CPU fills the border columns.
+// The CPU code is compiled without floating point contraction, so every product and sum is rounded separately.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(std140, binding = 0) uniform Params {
+  int srcStride;
+  int srcRowCount;
+  int dstStride;
+  int bandRows;
+  int width;
+  int kernelWidth;
+  int kernelHeight;
+  int left;
+} params;
+
+layout(std430, binding = 1) readonly buffer SrcBuffer {
+  uint src[];
+};
+
+layout(std430, binding = 2) writeonly buffer DstBuffer {
+  uint dst[];
+};
+
+// The horizontal kernel followed by the vertical kernel.
+layout(std430, binding = 3) readonly buffer CoeffBuffer {
+  float coeffs[];
+};
+
+const int TILE_WIDTH = 64;
+const int TILE_ROWS = 16;
+const int MAX_KERNEL_HEIGHT = 32;
+const int GROUP_ITEMS = 256;
+
+shared float temp[(TILE_ROWS + MAX_KERNEL_HEIGHT - 1) * TILE_WIDTH];
+
+void main() {
+  const int kw = params.kernelWidth;
+  const int kh = params.kernelHeight;
+  const int left = params.left;
+  const int right = params.width - kw + left + 1;
+  const int tileX = int(gl_WorkGroupID.x) * TILE_WIDTH;
+  const int tileY = int(gl_WorkGroupID.y) * TILE_ROWS;
+
+  const int tileRows = min(TILE_ROWS + kh - 1, params.srcRowCount - tileY);
+  for (int i = int(gl_LocalInvocationIndex); i < tileRows * TILE_WIDTH; i += GROUP_ITEMS) {
+    const int r = i / TILE_WIDTH;
+    const int x = tileX + (i - r * TILE_WIDTH);
+    precise float sum = 0.0;
+    if (x >= left && x < right) {
+      const int rowBase = (tileY + r) * params.srcStride;
+      int sx = x - left;
+      for (int j = 0; j < kw; ++j, ++sx) {
+        const float value = float((src[rowBase + (sx >> 2)] >> (uint(sx & 3) * 8u)) & 0xffu);
+        sum += value * coeffs[j];
+      }
+    }
+    temp[i] = sum;
+  }
+  memoryBarrierShared();
+  barrier();
+
+  const int ly = int(gl_LocalInvocationID.y);
+  const int row = tileY + ly;
+  const int word = int(gl_GlobalInvocationID.x);
+  if (row >= params.bandRows || word * 4 >= params.width) {
+    return;
+  }
+  uint packed = 0u;
+  for (int b = 0; b < 4; ++b) {
+    const int c = int(gl_LocalInvocationID.x) * 4 + b;
+    const int x = tileX + c;
+    if (x < left || x >= right) {
+      continue;
+    }
+    precise float sum = 0.0;
+    for (int j = 0; j < kh; ++j) {
+      sum += temp[(ly + j) * TILE_WIDTH + c] * coeffs[kw + j];
+    }
+    packed |= uint(clamp(int(sum), 0, 255)) << uint(b * 8);
+  }
+  dst[row * params.dstStride + word] = packed;
+}
