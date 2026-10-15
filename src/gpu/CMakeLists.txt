@@ -1,6 +1,7 @@
 set(sources
     Gpu.cpp Gpu.h
     Internal.h
+    SavGolFilterKernel.h
     TransformKernel.h
     DewarpKernel.h)
 
@@ -8,6 +9,7 @@ if (GPU_SUPPORT)
   list(APPEND sources
       Device.cpp Device.h
       Banding.cpp Banding.h
+      SavGolFilterKernel.cpp
       TransformKernel.cpp
       DewarpKernel.cpp)
 else()
@@ -39,6 +41,15 @@ if (GPU_SUPPORT)
           OUTPUTS "${kernel}_${format}.comp.qsb")
     endforeach()
   endforeach()
+  qt_add_shaders(
+      gpu "gpu_savgol"
+      PREFIX "/gpu"
+      GLSL "430"
+      HLSL 50
+      MSL 12
+      QUIET
+      FILES shaders/savgol.comp
+      OUTPUTS "savgol.comp.qsb")
 endif()
 
 if (BUILD_TESTS)

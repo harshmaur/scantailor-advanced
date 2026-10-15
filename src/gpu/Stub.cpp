@@ -3,6 +3,7 @@
 
 #include "DewarpKernel.h"
 #include "Gpu.h"
+#include "SavGolFilterKernel.h"
 #include "TransformKernel.h"
 
 namespace gpu {
@@ -25,6 +26,10 @@ bool transform(const TransformParams&, std::vector<int>&) {
 }
 
 bool dewarp(const DewarpParams&, std::vector<int>&) {
+  return false;
+}
+
+bool savGolFilter(const SavGolParams&) {
   return false;
 }
 }  // namespace gpu

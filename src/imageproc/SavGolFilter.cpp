@@ -3,6 +3,8 @@
 
 #include "SavGolFilter.h"
 
+#include <gpu/SavGolFilterKernel.h>
+
 #include <stdexcept>
 
 #include "Grayscale.h"
@@ -39,6 +41,61 @@ inline void Kernel::convolve(uint8_t* dst, const uint8_t* srcTopLeft, int srcBpl
 
   const auto val = static_cast<int>(sum);
   *dst = static_cast<uint8_t>(qBound(0, val, 255));
+}
+
+void separablePass(const uint8_t* const srcData,
+                   const int srcBpl,
+                   uint8_t* const dstData,
+                   const int dstBpl,
+                   const int width,
+                   const int height,
+                   const SavGolKernel& horKernel,
+                   const SavGolKernel& vertKernel) {
+  const int kw = horKernel.width();
+  const int kh = vertKernel.height();
+  const int kTop = kh / 2;
+  const int kBottom = kh - kTop - 1;
+  const int kLeft = kw / 2;
+  const int shift = kw - 1;
+
+  // Allocate a 16-byte aligned temporary storage.
+  // That may help the compiler to emit efficient SSE code.
+  const int tempStride = (width - shift + 3) & ~3;
+  AlignedArray<float, 4> tempArray(tempStride * height);
+  // Horizontal pass.
+  const uint8_t* srcLine = srcData - shift;
+  float* tempLine = tempArray.data() - shift;
+  for (int y = 0; y < height; ++y) {
+    for (int i = shift; i < width; ++i) {
+      float sum = 0.0f;
+
+      const uint8_t* src = srcLine + i;
+      for (int j = 0; j < kw; ++j) {
+        sum += src[j] * horKernel[j];
+      }
+      tempLine[i] = sum;
+    }
+    tempLine += tempStride;
+    srcLine += srcBpl;
+  }
+  // Vertical pass.
+  uint8_t* dstLine = dstData + kTop * dstBpl + kLeft - shift;
+  tempLine = tempArray.data() - shift;
+  for (int y = kTop; y < height - kBottom; ++y) {
+    for (int i = shift; i < width; ++i) {
+      float sum = 0.0f;
+
+      float* tmp = tempLine + i;
+      for (int j = 0; j < kh; ++j, tmp += tempStride) {
+        sum += *tmp * vertKernel[j];
+      }
+      const auto val = static_cast<int>(sum);
+      dstLine[i] = static_cast<uint8_t>(qBound(0, val, 255));
+    }
+
+    tempLine += tempStride;
+    dstLine += dstBpl;
+  }
 }
 
 QImage savGolFilterGrayToGray(const QImage& src, const QSize& windowSize, const int horDegree, const int vertDegree) {
@@ -148,45 +205,10 @@ QImage savGolFilterGrayToGray(const QImage& src, const QSize& windowSize, const 
   const SavGolKernel horKernel(QSize(windowSize.width(), 1), QPoint(kCenter.x(), 0), horDegree, 0);
   const SavGolKernel vertKernel(QSize(1, windowSize.height()), QPoint(0, kCenter.y()), 0, vertDegree);
 
-  const int shift = kw - 1;
-
-  // Allocate a 16-byte aligned temporary storage.
-  // That may help the compiler to emit efficient SSE code.
-  const int tempStride = (width - shift + 3) & ~3;
-  AlignedArray<float, 4> tempArray(tempStride * height);
-  // Horizontal pass.
-  srcLine = srcData - shift;
-  float* tempLine = tempArray.data() - shift;
-  for (int y = 0; y < height; ++y) {
-    for (int i = shift; i < width; ++i) {
-      float sum = 0.0f;
-
-      const uint8_t* src = srcLine + i;
-      for (int j = 0; j < kw; ++j) {
-        sum += src[j] * horKernel[j];
-      }
-      tempLine[i] = sum;
-    }
-    tempLine += tempStride;
-    srcLine += srcBpl;
-  }
-  // Vertical pass.
-  dstLine = dstData + kTop * dstBpl + kLeft - shift;
-  tempLine = tempArray.data() - shift;
-  for (int y = kTop; y < height - kBottom; ++y) {
-    for (int i = shift; i < width; ++i) {
-      float sum = 0.0f;
-
-      float* tmp = tempLine + i;
-      for (int j = 0; j < kh; ++j, tmp += tempStride) {
-        sum += *tmp * vertKernel[j];
-      }
-      const auto val = static_cast<int>(sum);
-      dstLine[i] = static_cast<uint8_t>(qBound(0, val, 255));
-    }
-
-    tempLine += tempStride;
-    dstLine += dstBpl;
+  const gpu::SavGolParams gpuParams{srcData, srcBpl, dstData, dstBpl,           width,
+                                    height,  kw,     kh,      horKernel.data(), vertKernel.data()};
+  if (!gpu::savGolFilter(gpuParams)) {
+    separablePass(srcData, srcBpl, dstData, dstBpl, width, height, horKernel, vertKernel);
   }
 #endif  // if 0
 
