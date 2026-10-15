@@ -63,7 +63,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}\vcpkg-cache
-          key: vcpkg-${{ runner.os }}-x64-windows-static-md-v1
+          key: vcpkg-${{ runner.os }}-x64-windows-static-md-v2
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -72,7 +72,7 @@ jobs:
           New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\vcpkg-cache" | Out-Null
           $env:VCPKG_DEFAULT_BINARY_CACHE = "$env:GITHUB_WORKSPACE\vcpkg-cache"
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install `
-            boost-headers boost-test libjpeg-turbo libpng tiff zlib `
+            boost-test boost-foreach boost-lambda boost-multi-index boost-function boost-bind boost-smart-ptr boost-intrusive boost-iterator boost-type-traits boost-mpl boost-array libjpeg-turbo libpng tiff zlib `
             --triplet x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

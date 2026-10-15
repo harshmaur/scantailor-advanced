@@ -37,14 +37,16 @@ static bool fuzzyCompare(const QImage& img1, const QImage& img2) {
   const int line2Bpl = img2.bytesPerLine();
 
   int maxDiff = 0;
+  long sum = 0;
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       maxDiff = std::max(maxDiff, std::abs(int(line1[x]) - int(line2[x])));
+      sum += std::abs(int(line1[x]) - int(line2[x]));
     }
     line1 += line1Bpl;
     line2 += line2Bpl;
   }
-  std::fprintf(stderr, "DIAG size %dx%d maxDiff %d\n", width, height, maxDiff);
+  std::fprintf(stderr, "DIAG size %dx%d maxDiff %d mean %f\n", width, height, maxDiff, double(sum) / (width * height));
   return maxDiff <= 1;
 }
 
