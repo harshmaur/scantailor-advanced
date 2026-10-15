@@ -14,7 +14,7 @@
 #include <QVarLengthArray>
 #include <exception>
 
-#if QT_CONFIG(vulkan)
+#ifdef SCANTAILOR_GPU_VULKAN
 #include <QVulkanInstance>
 #endif
 
@@ -198,7 +198,7 @@ bool Device::initialize() {
   if (!m_rhi && wanted("d3d11")) {
     tryCreate(QRhi::D3D11, &d3d11Params, "Direct3D 11");
   }
-#elif QT_CONFIG(vulkan) && __has_include(<vulkan/vulkan.h>)
+#elif defined(SCANTAILOR_GPU_VULKAN)
   if (wanted("vulkan")) {
     m_vulkanInstance = std::make_unique<QVulkanInstance>();
     m_vulkanInstance->setExtensions(QRhiVulkanInitParams::preferredInstanceExtensions());
@@ -245,7 +245,7 @@ void Device::release() {
   m_dummyStorage.reset();
   m_dummyUniform.reset();
   m_rhi.reset();
-#if QT_CONFIG(vulkan)
+#ifdef SCANTAILOR_GPU_VULKAN
   m_vulkanInstance.reset();
 #endif
 }

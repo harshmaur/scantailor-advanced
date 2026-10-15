@@ -15,7 +15,10 @@
 #include <mutex>
 #include <vector>
 
+#if QT_CONFIG(vulkan) && __has_include(<vulkan/vulkan.h>)
+#define SCANTAILOR_GPU_VULKAN
 class QVulkanInstance;
+#endif
 
 namespace gpu {
 enum class Access { Uniform, Read, Write, ReadWrite };
@@ -122,7 +125,7 @@ class Device {
   QString m_name;
 
   // Accessed only on the device thread.
-#if QT_CONFIG(vulkan)
+#ifdef SCANTAILOR_GPU_VULKAN
   std::unique_ptr<QVulkanInstance> m_vulkanInstance;
 #endif
   std::unique_ptr<QRhi> m_rhi;
