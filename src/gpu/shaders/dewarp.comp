@@ -1,0 +1,331 @@
+#version 450
+
+// GPU port of areaMapGeneratrix() in src/dewarping/RasterDewarper.cpp. Compiled once per pixel format:
+// FORMAT_GRAY (8 bit, 4 pixels per uint), FORMAT_RGB and FORMAT_ARGB, all with integer mixing.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(std140, binding = 0) uniform Params {
+  int srcWidth;
+  int srcHeight;
+  int srcStride;
+  int srcRowBegin;
+  int srcRowCount;
+  int dstWidth;
+  int dstStride;
+  int bandRows;
+  int gridStride;
+  uint bgColor;
+  float maxRight;
+  float maxBottom;
+} params;
+
+layout(std430, binding = 1) readonly buffer SrcBuffer {
+  uint src[];
+};
+
+layout(std430, binding = 2) writeonly buffer DstBuffer {
+  uint dst[];
+};
+
+// bandRows + 1 rows of gridStride points, each a pair of float bit patterns (x, y).
+layout(std430, binding = 3) readonly buffer GridBuffer {
+  uint grid[];
+};
+
+// status[x]: column x must be recomputed on the CPU.
+layout(std430, binding = 4) buffer StatusBuffer {
+  uint status[];
+};
+
+// Larger source areas are left to the CPU to keep the dispatch time bounded.
+const int MAX_SRC_PIXELS = 64 * 64;
+
+bool unsure;
+
+vec2 gridPoint(int index) {
+  uint xBits = grid[index * 2];
+  uint yBits = grid[index * 2 + 1];
+  // Inputs that may overflow, are not finite or may be flushed to zero are left to the CPU.
+  for (int i = 0; i < 2; ++i) {
+    uint bits = (i == 0) ? xBits : yBits;
+    uint exponent = (bits >> 23) & 0xffu;
+    if (exponent >= 250u || (exponent < 27u && (bits & 0x7fffffffu) != 0u)) {
+      unsure = true;
+    }
+  }
+  return vec2(uintBitsToFloat(xBits), uintBitsToFloat(yBits));
+}
+
+uint fetch(int x, int y) {
+  int row = y - params.srcRowBegin;
+  if (row < 0 || row >= params.srcRowCount) {
+    unsure = true;
+    return 0u;
+  }
+#ifdef FORMAT_GRAY
+  return (src[row * params.srcStride + (x >> 2)] >> (uint(x & 3) * 8u)) & 0xffu;
+#else
+  return src[row * params.srcStride + x];
+#endif
+}
+
+#if defined(FORMAT_ARGB)
+uint accA;
+uint accR;
+uint accG;
+uint accB;
+
+void mixReset() {
+  accA = 0u;
+  accR = 0u;
+  accG = 0u;
+  accB = 0u;
+}
+
+void mixAdd(uint c, uint weight) {
+  uint alphaWeight = ((c >> 24) & 0xffu) * weight;
+  accA += alphaWeight;
+  accR += ((c >> 16) & 0xffu) * alphaWeight;
+  accG += ((c >> 8) & 0xffu) * alphaWeight;
+  accB += (c & 0xffu) * alphaWeight;
+}
+
+uint mixResult(uint totalWeight) {
+  if (accA == 0u) {
+    return 0u;
+  }
+  uint a = (accA + (totalWeight >> 1)) / totalWeight;
+  uint halfAlpha = accA >> 1;
+  uint r = (accR + halfAlpha) / accA;
+  uint g = (accG + halfAlpha) / accA;
+  uint b = (accB + halfAlpha) / accA;
+  return (a << 24) | (r << 16) | (g << 8) | b;
+}
+#elif defined(FORMAT_RGB)
+uint accR;
+uint accG;
+uint accB;
+
+void mixReset() {
+  accR = 0u;
+  accG = 0u;
+  accB = 0u;
+}
+
+void mixAdd(uint c, uint weight) {
+  accR += ((c >> 16) & 0xffu) * weight;
+  accG += ((c >> 8) & 0xffu) * weight;
+  accB += (c & 0xffu) * weight;
+}
+
+uint mixResult(uint totalWeight) {
+  uint halfWeight = totalWeight >> 1;
+  uint r = (accR + halfWeight) / totalWeight;
+  uint g = (accG + halfWeight) / totalWeight;
+  uint b = (accB + halfWeight) / totalWeight;
+  return 0xff000000u | (r << 16) | (g << 8) | b;
+}
+#else
+uint acc;
+
+void mixReset() {
+  acc = 0u;
+}
+
+void mixAdd(uint c, uint weight) {
+  acc += c * weight;
+}
+
+uint mixResult(uint totalWeight) {
+  return ((acc + (totalWeight >> 1)) / totalWeight) & 0xffu;
+}
+#endif
+
+uint dewarpPixel(int dx, int bandRow) {
+  int top = bandRow * params.gridStride + dx;
+  int bottom = top + params.gridStride;
+  vec2 leftTop = gridPoint(top);
+  vec2 rightTop = gridPoint(top + 1);
+  vec2 leftBottom = gridPoint(bottom);
+  vec2 rightBottom = gridPoint(bottom + 1);
+
+  precise vec2 quad0 = 16.0 * (leftTop + rightTop);
+  precise vec2 quad1 = 16.0 * (rightTop + rightBottom);
+  precise vec2 quad2 = 16.0 * (rightBottom + leftBottom);
+  precise vec2 quad3 = 16.0 * (leftTop + leftBottom);
+  vec2 quad[3] = vec2[3](quad1, quad2, quad3);
+
+  float fSrc32Left = quad0.x;
+  float fSrc32Top = quad0.y;
+  float fSrc32Right = fSrc32Left;
+  float fSrc32Bottom = fSrc32Top;
+  for (int i = 0; i < 3; ++i) {
+    vec2 pt = quad[i];
+    if (pt.x < fSrc32Left) {
+      fSrc32Left = pt.x;
+    } else if (pt.x > fSrc32Right) {
+      fSrc32Right = pt.x;
+    }
+    if (pt.y < fSrc32Top) {
+      fSrc32Top = pt.y;
+    } else if (pt.y > fSrc32Bottom) {
+      fSrc32Bottom = pt.y;
+    }
+  }
+
+  if (unsure || fSrc32Top < -32.0 * 10000.0 || fSrc32Left < -32.0 * 10000.0 || fSrc32Bottom > params.maxBottom
+      || fSrc32Right > params.maxRight) {
+    return params.bgColor;
+  }
+
+  int sw = params.srcWidth;
+  int sh = params.srcHeight;
+  int src32Left = int(floor(fSrc32Left));
+  int src32Right = int(ceil(fSrc32Right));
+  int src32Top = int(floor(fSrc32Top));
+  int src32Bottom = int(ceil(fSrc32Bottom));
+  int srcLeft = src32Left >> 5;
+  int srcRight = (src32Right - 1) >> 5;
+  int srcTop = src32Top >> 5;
+  int srcBottom = (src32Bottom - 1) >> 5;
+
+  if (srcBottom < 0 || srcRight < 0 || srcLeft >= sw || srcTop >= sh) {
+    return params.bgColor;
+  }
+
+  uint backgroundArea = 0u;
+
+  if (srcTop < 0) {
+    uint topFraction = uint(32 - (src32Top & 31));
+    uint horFraction = uint(src32Right - src32Left);
+    backgroundArea += topFraction * horFraction;
+    uint fullPixelsVer = uint(-1 - srcTop);
+    backgroundArea += horFraction * (fullPixelsVer << 5);
+    srcTop = 0;
+    src32Top = 0;
+  }
+  if (srcBottom >= sh) {
+    uint bottomFraction = uint(src32Bottom - (srcBottom << 5));
+    uint horFraction = uint(src32Right - src32Left);
+    backgroundArea += bottomFraction * horFraction;
+    uint fullPixelsVer = uint(srcBottom - sh);
+    backgroundArea += horFraction * (fullPixelsVer << 5);
+    srcBottom = sh - 1;
+    src32Bottom = sh << 5;
+  }
+  if (srcLeft < 0) {
+    uint leftFraction = uint(32 - (src32Left & 31));
+    uint vertFraction = uint(src32Bottom - src32Top);
+    backgroundArea += leftFraction * vertFraction;
+    uint fullPixelsHor = uint(-1 - srcLeft);
+    backgroundArea += vertFraction * (fullPixelsHor << 5);
+    srcLeft = 0;
+    src32Left = 0;
+  }
+  if (srcRight >= sw) {
+    uint rightFraction = uint(src32Right - (srcRight << 5));
+    uint vertFraction = uint(src32Bottom - src32Top);
+    backgroundArea += rightFraction * vertFraction;
+    uint fullPixelsHor = uint(srcRight - sw);
+    backgroundArea += vertFraction * (fullPixelsHor << 5);
+    srcRight = sw - 1;
+    src32Right = sw << 5;
+  }
+
+  if ((srcRight - srcLeft + 1) * (srcBottom - srcTop + 1) > MAX_SRC_PIXELS) {
+    unsure = true;
+    return params.bgColor;
+  }
+
+  mixReset();
+  mixAdd(params.bgColor, backgroundArea);
+
+  uint leftFraction = uint(32 - (src32Left & 31));
+  uint topFraction = uint(32 - (src32Top & 31));
+  uint rightFraction = uint(src32Right - (srcRight << 5));
+  uint bottomFraction = uint(src32Bottom - (srcBottom << 5));
+
+  uint srcArea = uint((src32Bottom - src32Top) * (src32Right - src32Left));
+  if (srcArea == 0u) {
+    return params.bgColor;
+  }
+
+  if (srcTop == srcBottom) {
+    if (srcLeft == srcRight) {
+      uint c = fetch(srcLeft, srcTop);
+      if (backgroundArea == 0u) {
+        return c;
+      }
+      mixAdd(c, srcArea);
+    } else {
+      uint vertFraction = uint(src32Bottom - src32Top);
+      mixAdd(fetch(srcLeft, srcTop), vertFraction * leftFraction);
+      for (int sx = srcLeft + 1; sx < srcRight; ++sx) {
+        mixAdd(fetch(sx, srcTop), vertFraction << 5);
+      }
+      mixAdd(fetch(srcRight, srcTop), vertFraction * rightFraction);
+    }
+  } else if (srcLeft == srcRight) {
+    uint horFraction = uint(src32Right - src32Left);
+    mixAdd(fetch(srcLeft, srcTop), horFraction * topFraction);
+    for (int sy = srcTop + 1; sy < srcBottom; ++sy) {
+      mixAdd(fetch(srcLeft, sy), horFraction << 5);
+    }
+    mixAdd(fetch(srcLeft, srcBottom), horFraction * bottomFraction);
+  } else {
+    mixAdd(fetch(srcLeft, srcTop), topFraction * leftFraction);
+    for (int sx = srcLeft + 1; sx < srcRight; ++sx) {
+      mixAdd(fetch(sx, srcTop), topFraction << 5);
+    }
+    mixAdd(fetch(srcRight, srcTop), topFraction * rightFraction);
+
+    for (int sy = srcTop + 1; sy < srcBottom; ++sy) {
+      mixAdd(fetch(srcLeft, sy), leftFraction << 5);
+      for (int sx = srcLeft + 1; sx < srcRight; ++sx) {
+        mixAdd(fetch(sx, sy), 32u * 32u);
+      }
+      mixAdd(fetch(srcRight, sy), rightFraction << 5);
+    }
+
+    mixAdd(fetch(srcLeft, srcBottom), bottomFraction * leftFraction);
+    for (int sx = srcLeft + 1; sx < srcRight; ++sx) {
+      mixAdd(fetch(sx, srcBottom), bottomFraction << 5);
+    }
+    mixAdd(fetch(srcRight, srcBottom), bottomFraction * rightFraction);
+  }
+
+  return mixResult(srcArea + backgroundArea);
+}
+
+uint dewarpChecked(int dx, int bandRow) {
+  unsure = false;
+  uint color = dewarpPixel(dx, bandRow);
+  if (unsure) {
+    status[dx] = 1u;
+  }
+  return color;
+}
+
+void main() {
+  int bandRow = int(gl_GlobalInvocationID.y);
+  int x = int(gl_GlobalInvocationID.x);
+#ifdef FORMAT_GRAY
+  int firstPixel = x * 4;
+  if (bandRow >= params.bandRows || firstPixel >= params.dstWidth) {
+    return;
+  }
+  uint packed = 0u;
+  for (int i = 0; i < 4; ++i) {
+    if (firstPixel + i < params.dstWidth) {
+      packed |= dewarpChecked(firstPixel + i, bandRow) << (uint(i) * 8u);
+    }
+  }
+  dst[bandRow * params.dstStride + x] = packed;
+#else
+  if (bandRow >= params.bandRows || x >= params.dstWidth) {
+    return;
+  }
+  dst[bandRow * params.dstStride + x] = dewarpChecked(x, bandRow);
+#endif
+}
